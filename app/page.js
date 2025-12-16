@@ -180,7 +180,7 @@ export default function Home() {
         <div className="max-w-5xl mx-auto text-center relative z-10">
           {/* Badge pequeño arriba */}
           <p className="text-xs sm:text-sm font-semibold text-blue-600 uppercase tracking-wide mb-4 sm:mb-6">
-            Free Practice for EPA 608 Certification
+          Free EPA 608 Practice Questions
           </p>
 
           {/* Headline principal centrado */}
@@ -193,11 +193,21 @@ export default function Home() {
           </h2>
 
           {/* Texto descriptivo */}
-          <p className="text-base sm:text-lg md:text-xl lg:text-2xl text-gray-600 mb-6 sm:mb-8 max-w-3xl mx-auto leading-relaxed px-2">
-            Boring. Confusing. Intimidating. No, we're not talking about today's news. We're talking about the EPA 608 exam. The manuals are overwhelming. PDFs are hard to navigate. The process is full of frustrations. No wonder you avoid it.
+          <p className="text-base sm:text-lg md:text-xl lg:text-2xl text-gray-600 mb-4 sm:mb-6 max-w-3xl mx-auto leading-relaxed px-2">
+            The EPA 608 exam doesn’t have to be painful.
           </p>
+
+          <p className="text-base sm:text-lg md:text-xl lg:text-2xl text-gray-600 mb-6 sm:mb-8 max-w-3xl mx-auto leading-relaxed px-2">
+            Instead of reading endless manuals or watching boring videos, you can practice with real EPA 608 exam-style questions, get instant feedback, and actually understand why each answer is right or wrong.
+          </p>
+
+          <p className="text-sm sm:text-base md:text-lg text-gray-500 mb-4 px-2">
+            Trusted by thousands of HVAC technicians preparing for the EPA 608 certification across the U.S.
+          </p>
+
+
           <p className="text-base sm:text-lg md:text-xl lg:text-2xl font-semibold text-slate-900 mb-6 sm:mb-8 px-2">
-            What if we told you there's a better way?
+            What if you could prepare the same way you’ll be tested?
           </p>
 
           {/* Botón CTA grande */}
