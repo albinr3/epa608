@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LangSetter from "./components/LangSetter";
+import { ClerkProvider } from '@clerk/nextjs';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "EPA 608 Practice Simulator | Real Questions & Explanations | HVAC Prep",
+  title: "Free EPA 608 Practice Test (2025) | HVAC Prep",
   description:
-    "Interactive EPA 608 simulator: practice with exam-style questions, instant feedback, clear explanations, and real exam mode. Start free (3 questions) and unlock 300+ for $12.",
+    "Take a free EPA 608 practice test with real exam-style questions, instant feedback, and clear explanations. Start free (20 questions) and unlock 300+ for just $9.99",
   keywords: [
     "EPA 608 simulator",
     "EPA 608 practice",
@@ -34,7 +35,7 @@ export const metadata = {
   creator: "HVAC Prep",
   publisher: "HVAC Prep",
   openGraph: {
-    title: "EPA 608 Practice Simulator | Practice with Instant Feedback",
+    title: "Free EPA 608 Practice Test | HVAC Prep",
     description:
       "Practice the EPA 608 exam with exam-style questions: we mark the correct answer instantly and explain why. 300+ questions, real exam mode. Start free.",
     type: "website",
@@ -42,7 +43,7 @@ export const metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "EPA 608 Practice Simulator | HVAC Prep",
+    title: "Free EPA 608 Practice Test | HVAC Prep",
     description:
       "Exam-style questions + instant feedback + explanations. Start free and prepare for EPA 608.",
   },
@@ -65,16 +66,21 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="alternate" hreflang="en" href="https://epa608practice.org/" />
-        <link rel="alternate" hreflang="es" href="https://epa608practice.org/es/" />
-        <link rel="alternate" hreflang="x-default" href="https://epa608practice.org/" />
-      </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <LangSetter />
-        {children}
-      </body>
-    </html>
+    <ClerkProvider
+      afterSignInUrl="/"
+      afterSignUpUrl="/"
+    >
+      <html lang="en">
+        <head>
+          <link rel="alternate" hrefLang="en" href="https://epa608practice.org/" />
+          <link rel="alternate" hrefLang="es" href="https://epa608practice.org/es/" />
+          <link rel="alternate" hrefLang="x-default" href="https://epa608practice.org/" />
+        </head>
+        <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+          <LangSetter />
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

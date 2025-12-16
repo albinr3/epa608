@@ -1,6 +1,17 @@
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 
-export function middleware(request) {
+// Define public routes (no authentication required)
+const isPublicRoute = createRouteMatcher([
+  '/',
+  '/pricing',
+  '/es',
+  '/es/pricing',
+  '/sign-in(.*)',
+  '/sign-up(.*)',
+]);
+
+export default clerkMiddleware(async (auth, request) => {
   const { pathname } = request.nextUrl;
   
   // Si está en rutas específicas, no hacer nada
@@ -10,7 +21,7 @@ export function middleware(request) {
     return NextResponse.next();
   }
   
-  // Obtener la cookie de preferencia de idioma
+  // Handle language preference logic
   const languagePreference = request.cookies.get('language-preference')?.value;
   
   // Si el usuario ya tiene una preferencia guardada, respetarla
@@ -37,50 +48,48 @@ export function middleware(request) {
       }
       return NextResponse.redirect(url);
     }
-    // Si ya está en el idioma correcto, continuar
-    return NextResponse.next();
   }
   
   // Si no hay preferencia guardada, solo redirigir desde la raíz en la primera visita
-  // y solo si el usuario no está ya en una ruta específica
-  if (pathname !== '/') {
-    return NextResponse.next();
+  if (pathname === '/') {
+    const acceptLanguage = request.headers.get('accept-language') || '';
+    const languages = acceptLanguage
+      .split(',')
+      .map(lang => lang.split(';')[0].trim().toLowerCase());
+    
+    const isSpanish = languages.some(lang => lang.startsWith('es')) && 
+                      !languages.some(lang => lang.startsWith('en') && languages.indexOf(lang) < languages.findIndex(l => l.startsWith('es')));
+    
+    if (isSpanish && !languagePreference) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/es';
+      const response = NextResponse.redirect(url);
+      response.cookies.set('language-preference', 'es', { 
+        maxAge: 60 * 60 * 24 * 365,
+        path: '/',
+        SameSite: 'Lax'
+      });
+      return response;
+    }
+    
+    if (!languagePreference) {
+      const response = NextResponse.next();
+      response.cookies.set('language-preference', 'en', { 
+        maxAge: 60 * 60 * 24 * 365,
+        path: '/',
+        SameSite: 'Lax'
+      });
+      return response;
+    }
   }
   
-  // Obtener el idioma preferido del navegador solo para la primera visita
-  const acceptLanguage = request.headers.get('accept-language') || '';
-  
-  // Detectar si el idioma es español
-  const languages = acceptLanguage
-    .split(',')
-    .map(lang => lang.split(';')[0].trim().toLowerCase());
-  
-  const isSpanish = languages.some(lang => lang.startsWith('es')) && 
-                    !languages.some(lang => lang.startsWith('en') && languages.indexOf(lang) < languages.findIndex(l => l.startsWith('es')));
-  
-  // Si el usuario prefiere español y no tiene preferencia guardada, redirigir a /es
-  if (isSpanish) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/es';
-    const response = NextResponse.redirect(url);
-    // Guardar la preferencia automática
-    response.cookies.set('language-preference', 'es', { 
-      maxAge: 60 * 60 * 24 * 365, // 1 año
-      path: '/',
-      SameSite: 'Lax'
-    });
-    return response;
+  // Protect routes (except public ones)
+  if (!isPublicRoute(request)) {
+    await auth.protect();
   }
   
-  // Si prefiere inglés, guardar la preferencia
-  const response = NextResponse.next();
-  response.cookies.set('language-preference', 'en', { 
-    maxAge: 60 * 60 * 24 * 365, // 1 año
-    path: '/',
-    SameSite: 'Lax'
-  });
-  return response;
-}
+  return NextResponse.next();
+});
 
 export const config = {
   matcher: [

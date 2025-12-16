@@ -1,17 +1,32 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CheckCircle2, Shield, Lock, Zap } from 'lucide-react';
+import { CheckCircle2, Trophy, Shield, Lock, Zap } from 'lucide-react';
+import { useUser, SignInButton, UserButton } from '@clerk/nextjs';
+import { usePathname } from 'next/navigation';
+import Image from 'next/image';
+import Link from 'next/link';
 import { questions } from '../data-en';
+import AuthModal from './AuthModal';
+import LanguageSelector from './LanguageSelector';
+
+const QUIZ_STORAGE_KEY = 'epa608_quiz_progress';
+const QUIZ_STORAGE_KEY_ES = 'epa608_quiz_progress_es';
 
 export default function Quiz() {
+  const { isSignedIn, isLoaded } = useUser();
+  const pathname = usePathname();
+  const isSpanish = pathname?.startsWith('/es') || false;
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showExplanation, setShowExplanation] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [correctAnswers, setCorrectAnswers] = useState(0);
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
+  const [answers, setAnswers] = useState([]); // Track answers for persistence
+  const [isRestoring, setIsRestoring] = useState(true);
 
   const currentQuestion = questions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
@@ -22,10 +37,119 @@ export default function Quiz() {
   // For premium users, show total progress; for non-premium, only first 3
   const totalQuestionsAnswered = isPremium ? answeredQuestions : freeQuestionsAnswered;
 
+  // Save quiz state to localStorage (save to shared key so progress persists across languages)
+  const saveQuizState = () => {
+    try {
+      const quizState = {
+        currentQuestionIndex,
+        correctAnswers,
+        answeredQuestions,
+        answers,
+        timestamp: Date.now(),
+      };
+      // Save to shared key so progress persists across languages
+      localStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify(quizState));
+      // Also save to ES key for backward compatibility
+      localStorage.setItem(QUIZ_STORAGE_KEY_ES, JSON.stringify(quizState));
+    } catch (error) {
+      console.error('Error saving quiz state:', error);
+    }
+  };
+
+  // Restore quiz state from localStorage (check shared key first, then language-specific key)
+  const restoreQuizState = () => {
+    try {
+      // Try shared key first (works across languages)
+      let savedState = localStorage.getItem(QUIZ_STORAGE_KEY);
+      // If not found, try language-specific key as fallback
+      if (!savedState) {
+        savedState = localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+      }
+      
+      if (savedState) {
+        const quizState = JSON.parse(savedState);
+        // Only restore if state is recent (within last hour)
+        const oneHour = 60 * 60 * 1000;
+        if (Date.now() - quizState.timestamp < oneHour) {
+          setCurrentQuestionIndex(quizState.currentQuestionIndex || 0);
+          setCorrectAnswers(quizState.correctAnswers || 0);
+          setAnsweredQuestions(quizState.answeredQuestions || 0);
+          setAnswers(quizState.answers || []);
+          return true;
+        } else {
+          // Clear old state from both keys
+          localStorage.removeItem(QUIZ_STORAGE_KEY);
+          localStorage.removeItem(QUIZ_STORAGE_KEY_ES);
+        }
+      }
+    } catch (error) {
+      console.error('Error restoring quiz state:', error);
+      localStorage.removeItem(QUIZ_STORAGE_KEY);
+      localStorage.removeItem(QUIZ_STORAGE_KEY_ES);
+    }
+    return false;
+  };
+
+  // Clear quiz state from localStorage (clear both keys)
+  const clearQuizState = () => {
+    try {
+      localStorage.removeItem(QUIZ_STORAGE_KEY);
+      localStorage.removeItem(QUIZ_STORAGE_KEY_ES);
+    } catch (error) {
+      console.error('Error clearing quiz state:', error);
+    }
+  };
+
+  // Restore state on mount and when user signs in
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    // Check if we have a redirect flag from authentication
+    const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    
+    if (isSignedIn && redirectFlag) {
+      // User just signed in, restore state
+      const restored = restoreQuizState();
+      localStorage.removeItem('epa608_redirect_after_auth');
+      setIsRestoring(false);
+    } else if (isSignedIn) {
+      // User is signed in but no redirect flag, try to restore anyway
+      restoreQuizState();
+      setIsRestoring(false);
+    } else {
+      // Not signed in, try to restore state (for users who might have state from before)
+      restoreQuizState();
+      setIsRestoring(false);
+    }
+  }, [isLoaded, isSignedIn]);
+
+  // Save state whenever it changes (but not during restoration)
+  useEffect(() => {
+    if (!isRestoring && isLoaded && currentQuestionIndex > 0) {
+      saveQuizState();
+    }
+  }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers]);
+
+  // Effect to show auth modal when reaching question 4 (index 3) and user is not signed in
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    // If user reaches question 4 (index 3) and is not signed in, show auth modal
+    if (currentQuestionIndex === 3 && !isSignedIn) {
+      setShowAuthModal(true);
+    }
+    
+    // If user signs in, close auth modal - state is preserved automatically
+    if (isSignedIn && showAuthModal) {
+      setShowAuthModal(false);
+      // User can now continue - the handleNext will work normally
+    }
+  }, [currentQuestionIndex, isSignedIn, isLoaded, showAuthModal]);
+
   // Effect to show modal when directly accessing premium question
   useEffect(() => {
     const question = questions[currentQuestionIndex];
-    if (question && question.id === 4 && !isPremium) {
+    if (question && question.id === 21 && !isPremium) {
       setShowPremiumModal(true);
     }
   }, [currentQuestionIndex, isPremium]);
@@ -44,19 +168,44 @@ export default function Quiz() {
     
     // Increment answered questions counter
     setAnsweredQuestions(prev => prev + 1);
+    
+    // Save answer to answers array for persistence
+    setAnswers(prev => {
+      const newAnswers = [...prev];
+      newAnswers[currentQuestionIndex] = {
+        questionId: currentQuestion.id,
+        selectedOption: optionIndex,
+        isCorrect: isCorrectAnswer,
+      };
+      return newAnswers;
+    });
   };
 
   const handleNext = () => {
     const nextIndex = currentQuestionIndex + 1;
     
-    // Check if next question is #4 (id: 4) and user is not premium
-    if (nextIndex < questions.length && questions[nextIndex].id === 4 && !isPremium) {
+    // Check if next question is #4 (index 3) and user is not signed in
+    // Pause the quiz and show auth modal
+    if (nextIndex === 3 && !isSignedIn && isLoaded) {
+      setShowAuthModal(true);
+      // Don't advance - pause the quiz
+      return;
+    }
+    
+    // Check if next question is #21 (id: 21) and user is not premium
+    if (nextIndex < questions.length && questions[nextIndex].id === 21 && !isPremium) {
       setShowPremiumModal(true);
       return;
     }
 
-    // Advance to next question
+    // Advance to next question only if user is signed in (for question 4+) or if it's before question 4
     if (nextIndex < questions.length) {
+      // If trying to go to question 4+ and not signed in, don't advance
+      if (nextIndex >= 3 && !isSignedIn) {
+        setShowAuthModal(true);
+        return;
+      }
+      
       setCurrentQuestionIndex(nextIndex);
       setSelectedAnswer(null);
       setShowExplanation(false);
@@ -112,16 +261,79 @@ export default function Quiz() {
   const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
 
   return (
-    <div className="min-h-screen bg-gray-50 text-slate-900 p-4 md:p-8 relative overflow-hidden">
-      {/* Decorative background elements - non-interactive */}
-      <div className="absolute inset-0 pointer-events-none">
-        {/* Subtle circular gradients */}
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-100/20 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-100/20 rounded-full blur-3xl"></div>
-      </div>
+    <div className="min-h-screen bg-gray-50 text-slate-900 relative overflow-hidden">
+      {/* Navbar */}
+      <nav className="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-white/95 border-b border-gray-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
+          <a 
+            href={isSpanish ? "/es" : "/"}
+            onClick={(e) => {
+              e.preventDefault();
+              window.location.href = isSpanish ? "/es" : "/";
+            }}
+            className="cursor-pointer inline-block"
+            style={{ textDecoration: 'none' }}
+          >
+            <Image 
+              src="/logo.png" 
+              alt="HVAC Prep" 
+              width={400}
+              height={96}
+              className="h-10 sm:h-12 md:h-16 w-auto object-contain"
+              quality={100}
+              priority
+              unoptimized
+            />
+          </a>
+          <div className="flex items-center gap-3 sm:gap-4 md:gap-6 flex-wrap">
+            {!isSignedIn && (
+              <Link
+                href={isSpanish ? "/es/pricing" : "/pricing"}
+                className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
+              >
+                {isSpanish ? "Precios" : "Pricing"}
+              </Link>
+            )}
+            <LanguageSelector />
+            {isLoaded && (
+              <>
+                {!isSignedIn ? (
+                  <SignInButton 
+                    mode="modal"
+                    forceRedirectUrl={typeof window !== 'undefined' ? window.location.href : (isSpanish ? '/es' : '/')}
+                    fallbackRedirectUrl={typeof window !== 'undefined' ? window.location.href : (isSpanish ? '/es' : '/')}
+                  >
+                    <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
+                      Login
+                    </button>
+                  </SignInButton>
+                ) : (
+                  <UserButton 
+                    appearance={{
+                      elements: {
+                        avatarBox: "w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12"
+                      }
+                    }}
+                    afterSignOutUrl={isSpanish ? "/es" : "/"}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </nav>
 
-      {/* Quiz content */}
-      <div className="relative z-10 max-w-3xl mx-auto">
+      {/* Quiz Content with padding for navbar */}
+      <div className="pt-20 sm:pt-24 p-4 md:p-8 relative">
+        {/* Decorative background elements - non-interactive */}
+        <div className="absolute inset-0 pointer-events-none">
+          {/* Subtle circular gradients */}
+          <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-100/20 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-100/20 rounded-full blur-3xl"></div>
+        </div>
+
+        {/* Quiz content */}
+        <div className="relative z-10 max-w-3xl mx-auto">
         {/* Header with progress */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-2">
@@ -218,28 +430,17 @@ export default function Quiz() {
               <h3 className="text-lg font-semibold text-slate-900 mb-4">Your Progress</h3>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Score:</span>
-                  <span className="text-2xl font-bold text-blue-600">
-                    {totalQuestionsAnswered > 0 
-                      ? `${Math.round((correctAnswers / totalQuestionsAnswered) * 100)}%`
-                      : '0%'
-                    }
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Correct:</span>
-                  <span className="text-green-600 font-semibold">{correctAnswers}/{totalQuestionsAnswered}</span>
-                </div>
-                <div className="h-px bg-gray-200 my-2"></div>
-                <div className="flex justify-between items-center">
                   <span className="text-gray-600">Completed:</span>
                   <span className="text-green-600 font-semibold">{currentQuestionIndex + 1}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Remaining:</span>
-                  <span className="text-blue-600 font-semibold">{questions.length - (currentQuestionIndex + 1)}</span>
+                  <span className="text-blue-600 font-semibold">
+                    {questions.length - (currentQuestionIndex + 1)}
+                    {!isPremium && currentQuestionIndex + 1 < 20 && ` free`}
+                  </span>
                 </div>
-                {!isPremium && currentQuestionIndex + 1 >= 3 && (
+                {!isPremium && currentQuestionIndex + 1 >= 20 && (
                   <div className="mt-3 pt-3 border-t border-gray-200">
                     <p className="text-blue-600 text-xs text-center font-medium">
                       💡 You've completed the free trial. Unlock more questions to continue.
@@ -283,21 +484,13 @@ export default function Quiz() {
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 sm:p-6 rounded-t-2xl">
               <div className="text-center">
                 <h3 className="text-xl sm:text-2xl font-bold mb-3">
-                  You've completed the 3 free questions!
+                  You've completed the 20 free questions!
                 </h3>
-                {freeQuestionsAnswered > 0 && (
-                  <div className="bg-white/20 backdrop-blur-sm rounded-xl p-3 sm:p-4 mt-3">
-                    <div className="text-green-300 font-bold text-2xl sm:text-3xl mb-1">
-                      ✅ {correctAnswers}/{freeQuestionsAnswered} correct
-                    </div>
-                    <p className="text-blue-100 text-sm sm:text-base">
-                      {correctAnswers === 3 && "Excellent performance! Unlock 300+ questions to ensure your success."}
-                      {correctAnswers === 2 && "You're doing great. With more practice you'll master the exam completely."}
-                      {correctAnswers === 1 && "Every question counts. Get access to detailed explanations and more practice."}
-                      {correctAnswers === 0 && "With full access and detailed explanations, you'll improve quickly."}
-                    </p>
-                  </div>
-                )}
+                <div className="bg-white/20 backdrop-blur-sm rounded-xl p-3 sm:p-4 mt-3">
+                  <p className="text-blue-100 text-sm sm:text-base">
+                    Unlock 300+ questions to continue practicing and ensure your success on the EPA 608 exam.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -398,6 +591,19 @@ export default function Quiz() {
           </div>
         </div>
       )}
+
+        {/* Auth Modal - Cannot be closed, shows when trying to access question 4 */}
+        <AuthModal 
+          isOpen={showAuthModal} 
+          onClose={() => {
+            // Only close if user is signed in
+            if (isSignedIn) {
+              setShowAuthModal(false);
+            }
+          }}
+          language={isSpanish ? 'es' : 'en'}
+        />
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import Script from 'next/script';
 import { Timer, BookOpen, ShieldCheck, Building2, Users, Award, CheckCircle2, TrendingUp, Zap, TrendingDown, Star, ChevronDown } from 'lucide-react';
+import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import Quiz from '../components/Quiz-es';
 import LanguageSelector from '../components/LanguageSelector';
 
@@ -65,7 +66,22 @@ function FAQItem({ question, answer }) {
 }
 
 export default function HomeEs() {
+  const { isSignedIn, isLoaded } = useUser();
   const [showQuiz, setShowQuiz] = useState(false);
+
+  // Effect to handle redirect after OAuth authentication
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    // Check if user just returned from authentication
+    const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    
+    if (isSignedIn && redirectFlag) {
+      // User just authenticated, show quiz and restore state
+      setShowQuiz(true);
+      // Don't remove the flag yet - let Quiz component handle it
+    }
+  }, [isSignedIn, isLoaded]);
 
   if (showQuiz) {
     return <Quiz />;
@@ -159,12 +175,30 @@ export default function HomeEs() {
               Precios
             </Link>
             <LanguageSelector />
-            <a
-              href="#"
-              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
-            >
-              Login
-            </a>
+            {isLoaded && (
+              <>
+                {!isSignedIn ? (
+                  <SignInButton 
+                    mode="modal"
+                    forceRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/es'}
+                    fallbackRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/es'}
+                  >
+                    <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
+                      Login
+                    </button>
+                  </SignInButton>
+                ) : (
+                  <UserButton 
+                    appearance={{
+                      elements: {
+                        avatarBox: "w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12"
+                      }
+                    }}
+                    afterSignOutUrl="/es"
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -617,7 +651,7 @@ export default function HomeEs() {
             />
             <FAQItem
               question="¿Puedo practicar gratis antes de pagar?"
-              answer="Sí, ofrecemos una prueba gratuita con las primeras 3 preguntas del examen. Esto te permite experimentar nuestro simulador y ver la calidad de nuestras explicaciones antes de desbloquear las 300+ preguntas restantes por solo $12."
+              answer="Sí, ofrecemos una prueba gratuita con las primeras 20 preguntas del examen. Esto te permite experimentar nuestro simulador y ver la calidad de nuestras explicaciones antes de desbloquear las 300+ preguntas restantes por solo $12."
             />
           </div>
         </div>
@@ -667,7 +701,7 @@ export default function HomeEs() {
       <footer className="py-8 sm:py-12 px-4 sm:px-6 border-t border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-gray-600 text-xs sm:text-sm text-center md:text-left">
-            © 2024 HVAC Prep. Todos los derechos reservados.
+            © {new Date().getFullYear()} HVAC Prep. Todos los derechos reservados.
           </p>
           <div className="flex gap-4 sm:gap-6">
             <a

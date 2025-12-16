@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import Script from 'next/script';
 import { Timer, BookOpen, ShieldCheck, Building2, Users, Award, CheckCircle2, TrendingUp, Zap, TrendingDown, Star, ChevronDown } from 'lucide-react';
+import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import Quiz from './components/Quiz';
 import LanguageSelector from './components/LanguageSelector';
 import { questions } from './data-en'; // <--- AGREGA ESTO
@@ -65,6 +66,7 @@ function FAQItem({ question, answer }) {
 }
 
 export default function Home() {
+  const { isSignedIn, isLoaded } = useUser();
   const [showQuiz, setShowQuiz] = useState(false);
 
   if (showQuiz) {
@@ -159,12 +161,30 @@ export default function Home() {
               Pricing
             </Link>
             <LanguageSelector />
-            <a
-              href="#"
-              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
-            >
-              Login
-            </a>
+            {isLoaded && (
+              <>
+                {!isSignedIn ? (
+                  <SignInButton 
+                    mode="modal"
+                    forceRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/'}
+                    fallbackRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/'}
+                  >
+                    <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
+                      Login
+                    </button>
+                  </SignInButton>
+                ) : (
+                  <UserButton 
+                    appearance={{
+                      elements: {
+                        avatarBox: "w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12"
+                      }
+                    }}
+                    afterSignOutUrl="/"
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -180,21 +200,21 @@ export default function Home() {
         <div className="max-w-5xl mx-auto text-center relative z-10">
           {/* Badge pequeño arriba */}
           <p className="text-xs sm:text-sm font-semibold text-blue-600 uppercase tracking-wide mb-4 sm:mb-6">
-          Free EPA 608 Practice Questions
+          Free EPA 608 Practice Test
           </p>
 
           {/* Headline principal centrado */}
           <h1 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl xl:text-8xl font-bold mb-4 sm:mb-6 leading-tight text-slate-900">
             Pass Your{' '}
-            <span className="text-slate-900">EPA 608</span> Certification
+            <span className="text-slate-900">EPA 608</span> Exam
           </h1>
           <h2 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl xl:text-8xl font-bold mb-6 sm:mb-8 leading-tight text-blue-600">
-            Without the Hassle
+          With a Free Practice Test
           </h2>
 
           {/* Texto descriptivo */}
           <p className="text-base sm:text-lg md:text-xl lg:text-2xl text-gray-600 mb-4 sm:mb-6 max-w-3xl mx-auto leading-relaxed px-2">
-            The EPA 608 exam doesn’t have to be painful.
+            The EPA 608 exam doesn’t have to be painful—especially when you practice with a free EPA 608 practice test built from real exam questions.
           </p>
 
           <p className="text-base sm:text-lg md:text-xl lg:text-2xl text-gray-600 mb-6 sm:mb-8 max-w-3xl mx-auto leading-relaxed px-2">

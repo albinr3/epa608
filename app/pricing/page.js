@@ -2,10 +2,12 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import PricingSection from '../components/PricingSection';
 import LanguageSelector from '../components/LanguageSelector';
 
 export default function PricingPage() {
+  const { isSignedIn, isLoaded } = useUser();
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Navbar */}
@@ -31,12 +33,30 @@ export default function PricingPage() {
               Pricing
             </Link>
             <LanguageSelector />
-            <a
-              href="#"
-              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
-            >
-              Login
-            </a>
+            {isLoaded && (
+              <>
+                {!isSignedIn ? (
+                  <SignInButton 
+                    mode="modal"
+                    forceRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/pricing'}
+                    fallbackRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/pricing'}
+                  >
+                    <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
+                      Login
+                    </button>
+                  </SignInButton>
+                ) : (
+                  <UserButton 
+                    appearance={{
+                      elements: {
+                        avatarBox: "w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12"
+                      }
+                    }}
+                    afterSignOutUrl="/pricing"
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -50,7 +70,7 @@ export default function PricingPage() {
       <footer className="py-8 sm:py-12 px-4 sm:px-6 border-t border-gray-200 bg-white mt-12">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-gray-600 text-xs sm:text-sm text-center md:text-left">
-            © 2024 HVAC Prep. All rights reserved.
+            © {new Date().getFullYear()} HVAC Prep. All rights reserved.
           </p>
           <div className="flex gap-4 sm:gap-6">
             <a
