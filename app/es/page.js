@@ -75,13 +75,22 @@ export default function HomeEs() {
 
     // Check if user just returned from authentication
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    const showQuizFlag = localStorage.getItem('epa608_show_quiz');
     const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out');
     
     // Si el usuario acaba de desloguear, limpiar el flag y no mostrar el quiz
     if (justLoggedOut) {
       localStorage.removeItem('epa608_redirect_after_auth');
+      localStorage.removeItem('epa608_show_quiz');
       sessionStorage.removeItem('epa608_just_logged_out');
       setShowQuiz(false);
+      return;
+    }
+    
+    // Si hay flag para mostrar el quiz (desde el menú de otras páginas), mostrarlo
+    if (showQuizFlag) {
+      setShowQuiz(true);
+      localStorage.removeItem('epa608_show_quiz');
       return;
     }
     
@@ -189,6 +198,12 @@ export default function HomeEs() {
             >
               Precios
             </Link>
+            <button
+              onClick={() => setShowQuiz(true)}
+              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
+            >
+              Quiz
+            </button>
             <LanguageSelector />
             {isLoaded && (
               <>

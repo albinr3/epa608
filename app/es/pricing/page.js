@@ -32,6 +32,17 @@ export default function PricingPageEs() {
             >
               Precios
             </Link>
+            <Link
+              href="/es"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('epa608_show_quiz', 'true');
+                }
+              }}
+              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
+            >
+              Quiz
+            </Link>
             <LanguageSelector />
             {isLoaded && (
               <>
