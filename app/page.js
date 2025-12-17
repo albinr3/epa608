@@ -69,6 +69,21 @@ export default function Home() {
   const { isSignedIn, isLoaded } = useUser();
   const [showQuiz, setShowQuiz] = useState(false);
 
+  // Restore quiz state after OAuth redirect
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isLoaded) return;
+    
+    const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    
+    // Si hay flag de redirect, mostrar el quiz inmediatamente
+    // No esperamos a isSignedIn porque puede tardar en actualizarse después del redirect
+    // El Quiz mismo manejará la verificación de autenticación cuando se monte
+    if (redirectFlag) {
+      setShowQuiz(true);
+      // No remover el flag todavía - el Quiz lo manejará cuando confirme la autenticación
+    }
+  }, [isLoaded, isSignedIn]);
+
   if (showQuiz) {
     return <Quiz />;
   }
@@ -168,6 +183,12 @@ export default function Home() {
                     mode="modal"
                     forceRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/'}
                     fallbackRedirectUrl={typeof window !== 'undefined' ? window.location.href : '/'}
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        const currentUrl = window.location.href;
+                        localStorage.setItem('epa608_redirect_after_auth', currentUrl);
+                      }
+                    }}
                   >
                     <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
                       Login
@@ -240,7 +261,7 @@ export default function Home() {
           
           {/* Subtexto pequeño */}
           <p className="text-xs sm:text-sm text-gray-500">
-            No credit card required • 3 free questions
+            No credit card required • 20 free questions
           </p>
         </div>
       </section>

@@ -99,24 +99,135 @@ export default function QuizEs() {
 
   // Restaurar estado al montar y cuando el usuario inicia sesión
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:101',message:'useEffect triggered but isLoaded is false',data:{isLoaded,isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      return;
+    }
     
     // Verificar si tenemos una bandera de redirección de autenticación
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
     
-    if (isSignedIn && redirectFlag) {
-      // Usuario acaba de iniciar sesión, restaurar estado
-      const restored = restoreQuizState();
-      localStorage.removeItem('epa608_redirect_after_auth');
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:107',message:'useEffect triggered - checking sync',data:{isLoaded,isSignedIn,hasRedirectFlag:!!redirectFlag,redirectFlag},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
+    // Sincronizar usuario a la base de datos cuando inicia sesión (fallback si el webhook no está configurado)
+    if (isSignedIn) {
+      const syncKey = 'epa608_user_synced';
+      const hasSynced = sessionStorage.getItem(syncKey);
+      const syncInProgressKey = 'epa608_user_sync_in_progress';
+      const syncInProgress = sessionStorage.getItem(syncInProgressKey);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:115',message:'User is signed in, checking sync status',data:{isSignedIn,hasSynced,syncInProgress},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
+      if (!hasSynced && !syncInProgress) {
+        // Marcar que la sincronización está en progreso para evitar llamadas duplicadas
+        sessionStorage.setItem(syncInProgressKey, 'true');
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:118',message:'Starting user sync',data:{origin:window.location.origin,pathname:window.location.pathname},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        fetch('/api/users/sync', {
+          method: 'POST',
+        })
+          .then(async res => {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:123',message:'User sync response received',data:{status:res.status,ok:res.ok,contentType:res.headers.get('content-type')},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+            
+            // Verificar si la respuesta es HTML en lugar de JSON
+            const contentType = res.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+              // #region agent log
+              const text = await res.text();
+              fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:128',message:'Response is not JSON',data:{status:res.status,contentType,preview:text.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
+              // #endregion
+              throw new Error(`Expected JSON but got ${contentType || 'unknown'}. Status: ${res.status}`);
+            }
+            
+            return res.json();
+          })
+          .then(data => {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:137',message:'User sync data parsed',data:{success:data.success,hasUser:!!data.user,error:data.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+            if (data.success) {
+              sessionStorage.setItem(syncKey, 'true');
+            }
+            // Remover la marca de sincronización en progreso
+            sessionStorage.removeItem(syncInProgressKey);
+          })
+          .catch(error => {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:144',message:'User sync error',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+            console.error('Error syncing user:', error);
+            // Remover la marca de sincronización en progreso incluso si hay error
+            sessionStorage.removeItem(syncInProgressKey);
+          });
+      }
+    } else {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:140',message:'User is NOT signed in',data:{isSignedIn,isLoaded,hasRedirectFlag:!!redirectFlag},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+    }
+    
+    if (redirectFlag) {
+      // Hay flag de redirect - restaurar estado del quiz
+      restoreQuizState();
+      // Remover el flag si el usuario está autenticado
+      if (isSignedIn) {
+        localStorage.removeItem('epa608_redirect_after_auth');
+      }
       setIsRestoring(false);
     } else if (isSignedIn) {
-      // Usuario está logueado pero no hay bandera de redirección, intentar restaurar de todas formas
+      // User is signed in but no redirect flag, try to restore anyway
       restoreQuizState();
       setIsRestoring(false);
     } else {
-      // No está logueado, verificar si debemos restaurar (para usuarios que puedan tener estado previo)
+      // Not signed in, try to restore state (for users who might have state from before)
       restoreQuizState();
       setIsRestoring(false);
+    }
+  }, [isLoaded, isSignedIn]);
+  
+  // Polling para verificar cuando isSignedIn finalmente se actualiza después del redirect
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    if (redirectFlag && !isSignedIn) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:147',message:'Polling: redirect flag exists but user not signed in',data:{redirectFlag,isSignedIn,isLoaded},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      
+      // Forzar recarga del estado de autenticación después de un delay
+      // Esto ayuda cuando Clerk tarda en actualizar el estado después del redirect
+      const timeoutId = setTimeout(() => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:153',message:'Timeout reached, checking if still not signed in before reload',data:{isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+        // Recargar la página si aún no está autenticado
+        // Esto fuerza a Clerk a re-evaluar el estado de autenticación
+        // Solo recargar si el flag todavía existe (no fue removido por otro proceso)
+        if (!isSignedIn && localStorage.getItem('epa608_redirect_after_auth')) {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:159',message:'Forcing page reload to refresh auth state',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
+          // #endregion
+          window.location.reload();
+        }
+      }, 2000);
+      
+      return () => clearTimeout(timeoutId);
+    } else if (redirectFlag && isSignedIn) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:167',message:'Polling: user signed in, removing redirect flag',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      localStorage.removeItem('epa608_redirect_after_auth');
     }
   }, [isLoaded, isSignedIn]);
 
@@ -354,7 +465,7 @@ export default function QuizEs() {
         {/* Pregunta con marcador a la derecha */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
           {/* Sección de Pregunta - Ocupa 2 columnas en desktop */}
-          <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-4 sm:p-6 md:p-8 shadow-sm">
+          <div className="lg:col-span-2 order-1 bg-white border border-gray-200 rounded-xl p-4 sm:p-6 md:p-8 shadow-sm">
           <h2 className="text-lg sm:text-xl md:text-2xl font-semibold text-slate-900 mb-4 sm:mb-6 leading-tight">
             {currentQuestion.text}
           </h2>
@@ -421,8 +532,20 @@ export default function QuizEs() {
           )}
           </div>
 
+          {/* Botón Siguiente - Antes del score en móvil, después en desktop */}
+          {isAnswered && (
+            <div className="order-2 lg:order-3 lg:col-span-3 flex justify-end mt-4 sm:mt-6 lg:mt-0">
+              <button
+                onClick={handleNext}
+                className="px-6 sm:px-8 py-3 sm:py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 touch-manipulation min-w-[120px]"
+              >
+                {currentQuestionIndex + 1 < questions.length ? 'Siguiente' : 'Finalizar'}
+              </button>
+            </div>
+          )}
+
           {/* Marcador de puntuación - 1 columna en desktop */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 order-3 lg:order-2">
             <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm lg:sticky lg:top-4">
               <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-3 sm:mb-4">Tu Progreso</h3>
               <div className="space-y-2 sm:space-y-3">
@@ -448,18 +571,6 @@ export default function QuizEs() {
             </div>
           </div>
           </div>
-
-          {/* Botón Siguiente */}
-        {isAnswered && (
-          <div className="flex justify-end mt-4 sm:mt-6">
-            <button
-              onClick={handleNext}
-              className="px-6 sm:px-8 py-3 sm:py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 touch-manipulation min-w-[120px]"
-            >
-              {currentQuestionIndex + 1 < questions.length ? 'Siguiente' : 'Finalizar'}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Modal Premium con PricingSection */}

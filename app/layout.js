@@ -1,7 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LangSetter from "./components/LangSetter";
-import { ClerkProvider } from '@clerk/nextjs';
+import ClerkProviderWrapper from "./components/ClerkProviderWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -66,21 +66,16 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <ClerkProvider
-      afterSignInUrl="/"
-      afterSignUpUrl="/"
-    >
-      <html lang="en">
-        <head>
-          <link rel="alternate" hrefLang="en" href="https://epa608practice.org/" />
-          <link rel="alternate" hrefLang="es" href="https://epa608practice.org/es/" />
-          <link rel="alternate" hrefLang="x-default" href="https://epa608practice.org/" />
-        </head>
-        <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="en">
+      <head>{/* ... */}</head>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <ClerkProviderWrapper>
+          <div id="clerk-captcha" style={{ position:'absolute', left:'-9999px', width:'1px', height:'1px', overflow:'hidden', opacity:0, pointerEvents:'none' }} aria-hidden="true" />
           <LangSetter />
           {children}
-        </body>
-      </html>
-    </ClerkProvider>
+        </ClerkProviderWrapper>
+      </body>
+    </html>
   );
 }
+

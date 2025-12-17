@@ -241,6 +241,11 @@ export default function HomeEs() {
           >
             Probar Gratis
           </button>
+          
+          {/* Subtexto pequeño */}
+          <p className="text-xs sm:text-sm text-gray-500">
+            No se requiere tarjeta de crédito • 20 preguntas gratis
+          </p>
 
           {/* Badges de Estadísticas - Centrados debajo del botón */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4 mt-6 sm:mt-8 md:mt-12 max-w-4xl mx-auto px-2">

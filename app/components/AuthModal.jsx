@@ -23,7 +23,11 @@ export default function AuthModal({ isOpen, onClose, language = 'en' }) {
     
     // Guardar la URL actual para redirigir después del login
     const currentUrl = window.location.href;
+    const callbackUrl = '/sso-callback';
     localStorage.setItem('epa608_redirect_after_auth', currentUrl);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthModal.jsx:27',message:'Setting redirect flag',data:{currentUrl,callbackUrl,language:isSpanish?'es':'en'},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'G'})}).catch(()=>{});
+    // #endregion
     
     // Esperar a que signIn esté cargado
     if (!signInLoaded) {
@@ -32,12 +36,12 @@ export default function AuthModal({ isOpen, onClose, language = 'en' }) {
     
     try {
       // Usar signIn.authenticateWithRedirect para OAuth social
-      // Esto inicia directamente el flujo OAuth sin mostrar modal
-      // Clerk maneja automáticamente sign in y sign up para OAuth
+      // IMPORTANTE: redirectUrl debe apuntar a la ruta donde está <AuthenticateWithRedirectCallback />
+      // redirectUrlComplete es donde se redirige después de completar la autenticación
       if (signIn) {
         await signIn.authenticateWithRedirect({
           strategy: 'oauth_google',
-          redirectUrl: currentUrl,
+          redirectUrl: callbackUrl,
           redirectUrlComplete: currentUrl,
         });
       } else {
@@ -46,7 +50,7 @@ export default function AuthModal({ isOpen, onClose, language = 'en' }) {
           strategy: 'oauth_google',
         });
         await newSignIn.authenticateWithRedirect({
-          redirectUrl: currentUrl,
+          redirectUrl: callbackUrl,
           redirectUrlComplete: currentUrl,
         });
       }
@@ -55,7 +59,7 @@ export default function AuthModal({ isOpen, onClose, language = 'en' }) {
       try {
         await clerk.authenticateWithRedirect({
           strategy: 'oauth_google',
-          redirectUrl: currentUrl,
+          redirectUrl: callbackUrl,
           redirectUrlComplete: currentUrl,
         });
       } catch (fallbackError) {
