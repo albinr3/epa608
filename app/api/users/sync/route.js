@@ -1,5 +1,6 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { upsertUser, getUserByClerkId, markWelcomeEmailSent } from '@/lib/db/users';
 import { sendWelcomeEmail } from '@/lib/emails/sendWelcomeEmail';
 
@@ -87,10 +88,16 @@ export async function POST(req) {
         // Si es un usuario nuevo y no se ha enviado el email de bienvenida, enviarlo
         if (!existingUser || !existingUser.welcome_email_sent) {
           try {
+            // Obtener el idioma de la cookie language-preference
+            const cookieStore = await cookies();
+            const languagePreference = cookieStore.get('language-preference')?.value || 'es';
+            const lang = languagePreference === 'es' ? 'es' : 'en';
+            
             await sendWelcomeEmail({
               userId: dbUser.id,
               email: email,
               firstName: user.firstName || null,
+              lang: lang,
             });
 
             await markWelcomeEmailSent(dbUser.id);

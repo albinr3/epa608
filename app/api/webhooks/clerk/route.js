@@ -68,11 +68,15 @@ export async function POST(req) {
       });
 
       // Enviar email de bienvenida
+      // Nota: En webhooks no tenemos acceso a cookies del navegador, 
+      // así que usamos 'en' como default. El email correcto se enviará
+      // desde /api/users/sync cuando el usuario inicie sesión.
       try {
         await sendWelcomeEmail({
           userId: user.id,
           email: primaryEmail.email_address,
           firstName: first_name || null,
+          lang: 'en', // Default en webhook, se corregirá en sync si es necesario
         });
 
         // Marcar que el email de bienvenida fue enviado
