@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CheckCircle2, Trophy, Shield, Lock, Zap } from "lucide-react";
 import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
@@ -27,6 +27,10 @@ export default function Quiz() {
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
   const [answers, setAnswers] = useState([]); // Track answers for persistence
   const [isRestoring, setIsRestoring] = useState(true);
+  const [isLoadingFromDatabase, setIsLoadingFromDatabase] = useState(false);
+  const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
+  const prevIsSignedInRef = useRef(null);
+  const justLoggedOutRef = useRef(false);
 
   const currentQuestion = questions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
@@ -58,8 +62,87 @@ export default function Quiz() {
     }
   };
 
+  // Save quiz progress to Supabase
+  const saveProgressToDatabase = async () => {
+    if (!isSignedIn || !isLoaded || isLoadingFromDatabase || !hasLoadedFromDatabase) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/quiz/progress', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentQuestionIndex,
+          correctAnswers,
+          totalAnswered: answeredQuestions,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to save progress');
+      }
+
+      const data = await response.json();
+    } catch (error) {
+      console.error('Error saving progress to database:', error);
+    }
+  };
+
+  // Load quiz progress from Supabase database
+  const loadProgressFromDatabase = async () => {
+    if (!isSignedIn || !isLoaded) {
+      return null;
+    }
+
+    try {
+      const response = await fetch('/api/quiz/progress', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.progress) {
+        return {
+          currentQuestionIndex: data.progress.current_question_index || 0,
+          correctAnswers: data.progress.correct_answers || 0,
+          answeredQuestions: data.progress.total_answered || 0,
+          answers: [], // We don't store individual answers in DB, only progress
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error loading progress from database:', error);
+      return null;
+    }
+  };
+
   // Restore quiz state from localStorage (check shared key first, then language-specific key)
   const restoreQuizState = () => {
+    // Check if we just logged out - if so, don't restore anything
+    const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
+    if (justLoggedOut && !isSignedIn) {
+      // Don't clear the flag here - let the useEffect handle it
+      return false;
+    }
+    
+    // If user is not signed in, don't restore from localStorage
+    // This prevents restoring old progress after logout
+    if (!isSignedIn) {
+      return false;
+    }
+
     try {
       // Try shared key first (works across languages)
       let savedState = localStorage.getItem(QUIZ_STORAGE_KEY);
@@ -102,9 +185,53 @@ export default function Quiz() {
     }
   };
 
+  // Reset quiz progress when user logs out - MUST run BEFORE restore useEffect
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    // Only reset if user was previously signed in and now is not (actual logout)
+    if (prevIsSignedInRef.current === true && !isSignedIn) {
+      // Set flag FIRST to prevent restoreQuizState from reading old data
+      sessionStorage.setItem('epa608_just_logged_out', 'true');
+      justLoggedOutRef.current = true;
+      // Clear localStorage to prevent restoreQuizState from reading old data
+      clearQuizState();
+      // Clear redirect flag to prevent auto-redirect to quiz
+      localStorage.removeItem('epa608_redirect_after_auth');
+      // Reset state
+      setCurrentQuestionIndex(0);
+      setCorrectAnswers(0);
+      setAnsweredQuestions(0);
+      setAnswers([]);
+      setSelectedAnswer(null);
+      setShowExplanation(false);
+      setHasLoadedFromDatabase(false);
+      setIsRestoring(false);
+      
+      // Clear the flag after a delay to allow restoreQuizState to check it
+      // Use setTimeout to ensure all pending restoreQuizState calls have a chance to check the flag
+      setTimeout(() => {
+        sessionStorage.removeItem('epa608_just_logged_out');
+        justLoggedOutRef.current = false;
+      }, 1000);
+    }
+
+    // Update ref to track current state for next render
+    prevIsSignedInRef.current = isSignedIn;
+  }, [isLoaded, isSignedIn]);
+
   // Restore state on mount and when user signs in
   useEffect(() => {
     if (!isLoaded) return;
+
+    // Check if we just logged out - if so, don't restore anything
+    const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
+    if (justLoggedOut && !isSignedIn) {
+      // Don't clear the flag yet - keep it for restoreQuizState to check
+      // The flag will be cleared after restoreQuizState has a chance to check it
+      setIsRestoring(false);
+      return;
+    }
 
     // Check if we have a redirect flag from authentication
     const redirectFlag = localStorage.getItem("epa608_redirect_after_auth");
@@ -126,42 +253,94 @@ export default function Quiz() {
             if (!res.ok) throw new Error(text);
             return JSON.parse(text);
           })
-          .then((data) => {
+          .then(async (data) => {
             if (data.success) sessionStorage.setItem(syncKey, "true");
             sessionStorage.removeItem(syncInProgressKey);
+            
+            // After syncing, load progress from database (prioritize DB over localStorage)
+            setIsLoadingFromDatabase(true);
+            const dbProgress = await loadProgressFromDatabase();
+            if (dbProgress) {
+              // Limpiar localStorage para evitar conflictos
+              clearQuizState();
+              setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+              setCorrectAnswers(dbProgress.correctAnswers);
+              setAnsweredQuestions(dbProgress.answeredQuestions);
+              setAnswers(dbProgress.answers);
+              // Update localStorage with DB progress
+              saveQuizState();
+            } else {
+              // No progress in DB, try localStorage
+              restoreQuizState();
+            }
+            setIsLoadingFromDatabase(false);
+            setHasLoadedFromDatabase(true);
+            setIsRestoring(false);
           })
           .catch((err) => {
             console.error("Error syncing user:", err);
             sessionStorage.removeItem(syncInProgressKey);
+            // On error, fall back to localStorage
+            restoreQuizState();
+            setIsRestoring(false);
           });
+      } else if (hasSynced) {
+        // User already synced, load progress from database
+        setIsLoadingFromDatabase(true);
+        loadProgressFromDatabase().then((dbProgress) => {
+          if (dbProgress) {
+            // Limpiar localStorage para evitar conflictos
+            clearQuizState();
+            setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+            setCorrectAnswers(dbProgress.correctAnswers);
+            setAnsweredQuestions(dbProgress.answeredQuestions);
+            setAnswers(dbProgress.answers);
+            saveQuizState();
+          } else {
+            restoreQuizState();
+          }
+          setIsLoadingFromDatabase(false);
+          setHasLoadedFromDatabase(true);
+          setIsRestoring(false);
+        }).catch(() => {
+          setIsLoadingFromDatabase(false);
+          setHasLoadedFromDatabase(true);
+          restoreQuizState();
+          setIsRestoring(false);
+        });
+      } else {
+        // Sync in progress, wait a bit and try localStorage
+        restoreQuizState();
+        setIsRestoring(false);
       }
-    }
-
-    if (redirectFlag) {
-      // Hay flag de redirect - restaurar estado del quiz
-      restoreQuizState();
-      // Remover el flag si el usuario está autenticado
-      if (isSignedIn) {
-        localStorage.removeItem("epa608_redirect_after_auth");
-      }
-      setIsRestoring(false);
-    } else if (isSignedIn) {
-      // User is signed in but no redirect flag, try to restore anyway
-      restoreQuizState();
-      setIsRestoring(false);
     } else {
-      // Not signed in, try to restore state (for users who might have state from before)
-      restoreQuizState();
-      setIsRestoring(false);
+      // Not signed in, check if we just logged out
+      const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out');
+      
+      // If user just logged out, don't restore from localStorage
+      if (justLoggedOut) {
+        // Clear the flag after using it
+        sessionStorage.removeItem('epa608_just_logged_out');
+        setIsRestoring(false);
+      } else if (redirectFlag) {
+        restoreQuizState();
+        setIsRestoring(false);
+      } else {
+        restoreQuizState();
+        setIsRestoring(false);
+      }
     }
   }, [isLoaded, isSignedIn]);
+
 
   // Save state whenever it changes (but not during restoration)
   useEffect(() => {
     if (!isRestoring && isLoaded && currentQuestionIndex > 0) {
       saveQuizState();
+      // Also save to database if user is signed in
+      saveProgressToDatabase();
     }
-  }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers]);
+  }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers, isSignedIn, isLoaded]);
 
   // Effect to show auth modal when reaching question 4 (index 3) and user is not signed in
   useEffect(() => {

@@ -25,9 +25,6 @@ export default function AuthModal({ isOpen, onClose, language = 'en' }) {
     const currentUrl = window.location.href;
     const callbackUrl = '/sso-callback';
     localStorage.setItem('epa608_redirect_after_auth', currentUrl);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthModal.jsx:27',message:'Setting redirect flag',data:{currentUrl,callbackUrl,language:isSpanish?'es':'en'},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
     
     // Esperar a que signIn esté cargado
     if (!signInLoaded) {

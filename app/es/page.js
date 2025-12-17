@@ -75,11 +75,26 @@ export default function HomeEs() {
 
     // Check if user just returned from authentication
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out');
     
+    // Si el usuario acaba de desloguear, limpiar el flag y no mostrar el quiz
+    if (justLoggedOut) {
+      localStorage.removeItem('epa608_redirect_after_auth');
+      sessionStorage.removeItem('epa608_just_logged_out');
+      setShowQuiz(false);
+      return;
+    }
+    
+    // Solo mostrar el quiz si hay flag de redirect Y el usuario está autenticado
+    // Esto evita que se muestre el quiz cuando el usuario se desloguea
     if (isSignedIn && redirectFlag) {
       // User just authenticated, show quiz and restore state
       setShowQuiz(true);
       // Don't remove the flag yet - let Quiz component handle it
+    } else if (redirectFlag && !isSignedIn) {
+      // Si hay flag pero el usuario no está autenticado, limpiar el flag
+      // Esto puede pasar si el usuario se deslogueó
+      localStorage.removeItem('epa608_redirect_after_auth');
     }
   }, [isSignedIn, isLoaded]);
 

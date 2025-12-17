@@ -74,13 +74,25 @@ export default function Home() {
     if (typeof window === 'undefined' || !isLoaded) return;
     
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out');
     
-    // Si hay flag de redirect, mostrar el quiz inmediatamente
-    // No esperamos a isSignedIn porque puede tardar en actualizarse después del redirect
-    // El Quiz mismo manejará la verificación de autenticación cuando se monte
-    if (redirectFlag) {
+    // Si el usuario acaba de desloguear, limpiar el flag y no mostrar el quiz
+    if (justLoggedOut) {
+      localStorage.removeItem('epa608_redirect_after_auth');
+      sessionStorage.removeItem('epa608_just_logged_out');
+      setShowQuiz(false);
+      return;
+    }
+    
+    // Solo mostrar el quiz si hay flag de redirect Y el usuario está autenticado
+    // Esto evita que se muestre el quiz cuando el usuario se desloguea
+    if (redirectFlag && isSignedIn) {
       setShowQuiz(true);
       // No remover el flag todavía - el Quiz lo manejará cuando confirme la autenticación
+    } else if (redirectFlag && !isSignedIn) {
+      // Si hay flag pero el usuario no está autenticado, limpiar el flag
+      // Esto puede pasar si el usuario se deslogueó
+      localStorage.removeItem('epa608_redirect_after_auth');
     }
   }, [isLoaded, isSignedIn]);
 

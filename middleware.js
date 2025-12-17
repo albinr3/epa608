@@ -39,29 +39,54 @@ export default clerkMiddleware(async (auth, request) => {
     return NextResponse.next();
   }
 
+  /**
+   * FIX CRÍTICO: Corrección de redirección de idioma después de OAuth
+   * 
+   * PROBLEMA:
+   * Cuando un usuario se autentica con Google desde la versión en español (/es),
+   * el flujo es el siguiente:
+   * 1. Usuario está en /es → hace clic en "Continuar con Google"
+   * 2. Clerk procesa OAuth y redirige de vuelta
+   * 3. Clerk redirige a / (inglés) en lugar de /es, ignorando redirectUrlComplete
+   * 
+   * Esto causa que usuarios que iniciaron en español terminen viendo la versión
+   * en inglés después del login, rompiendo la experiencia de usuario.
+   * 
+   * SOLUCIÓN:
+   * Interceptar las peticiones a / (raíz) ANTES de la lógica de idioma general
+   * (ver línea 79+). Si detectamos que:
+   * - El pathname es "/"
+   * - NO es un callback activo de Clerk (ya procesado)
+   * - La cookie language-preference es "es"
+   * 
+   * Entonces redirigimos automáticamente a /es para preservar el idioma.
+   * 
+   * IMPORTANCIA:
+   * Este código debe ejecutarse ANTES de la lógica de idioma general para capturar
+   * específicamente el caso de post-OAuth. Es un fix crítico que complementa
+   * la solución en app/sso-callback/page.js.
+   * 
+   * ⚠️ NO ELIMINAR: Este fix resuelve un bug crítico de UX.
+   * Si se elimina, el problema regresará y los usuarios verán el idioma incorrecto
+   * después de autenticarse con Google. Este bloque debe mantenerse ANTES de la
+   * lógica de idioma general para funcionar correctamente.
+   */
+  if (pathname === "/" && !hasClerkCallback) {
+    const languagePreference = request.cookies.get("language-preference")?.value;
+    
+    // Si la preferencia es español y estamos en la raíz, redirigir a /es
+    // Esto captura el caso donde Clerk redirige a / después del OAuth
+    if (languagePreference === "es") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/es";
+      return NextResponse.redirect(url);
+    }
+  }
+
   // Para APIs, solo procesar /api/users/sync (necesita autenticación)
   // Otras APIs pasan sin procesar
   if (pathname.startsWith("/api")) {
     if (pathname === "/api/users/sync") {
-      // #region agent log
-      const logData = {
-        location: "middleware.js:43",
-        message: "Processing /api/users/sync",
-        data: { pathname, method: request.method, hasAuth: true },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        runId: "run4",
-        hypothesisId: "H",
-      };
-      fetch(
-        "http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(logData),
-        }
-      ).catch(() => {});
-      // #endregion
       // Dejar que Clerk procese la autenticación, continuar con el flujo
     } else {
       // Para otras APIs (webhooks, etc.), pasar sin procesar
@@ -150,25 +175,6 @@ export default clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {
     await auth.protect();
   }
-
-  // #region agent log
-  if (pathname === "/api/users/sync") {
-    const logData = {
-      location: "middleware.js:112",
-      message: "About to return NextResponse.next for /api/users/sync",
-      data: { pathname, method: request.method },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-      runId: "run4",
-      hypothesisId: "H",
-    };
-    fetch("http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(logData),
-    }).catch(() => {});
-  }
-  // #endregion
 
   return NextResponse.next();
 });

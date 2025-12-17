@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { CheckCircle2, Shield, Lock, Zap } from 'lucide-react';
 import { useUser, SignInButton, UserButton } from '@clerk/nextjs';
 import Image from 'next/image';
@@ -24,6 +24,10 @@ export default function QuizEs() {
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
   const [answers, setAnswers] = useState([]); // Track answers for persistence
   const [isRestoring, setIsRestoring] = useState(true);
+  const [isLoadingFromDatabase, setIsLoadingFromDatabase] = useState(false);
+  const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
+  const prevIsSignedInRef = useRef(null);
+  const justLoggedOutRef = useRef(false);
 
   const currentQuestion = questions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
@@ -53,8 +57,87 @@ export default function QuizEs() {
     }
   };
 
+  // Guardar progreso del quiz en Supabase
+  const saveProgressToDatabase = async () => {
+    if (!isSignedIn || !isLoaded || isLoadingFromDatabase || !hasLoadedFromDatabase) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/quiz/progress', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentQuestionIndex,
+          correctAnswers,
+          totalAnswered: answeredQuestions,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to save progress');
+      }
+
+      const data = await response.json();
+    } catch (error) {
+      console.error('Error guardando progreso en la base de datos:', error);
+    }
+  };
+
+  // Cargar progreso del quiz desde Supabase
+  const loadProgressFromDatabase = async () => {
+    if (!isSignedIn || !isLoaded) {
+      return null;
+    }
+
+    try {
+      const response = await fetch('/api/quiz/progress', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.progress) {
+        return {
+          currentQuestionIndex: data.progress.current_question_index || 0,
+          correctAnswers: data.progress.correct_answers || 0,
+          answeredQuestions: data.progress.total_answered || 0,
+          answers: [], // No guardamos respuestas individuales en DB, solo progreso
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error cargando progreso desde la base de datos:', error);
+      return null;
+    }
+  };
+
   // Restaurar estado del quiz desde localStorage (verificar clave compartida primero, luego clave específica de idioma)
   const restoreQuizState = () => {
+    // Verificar si acabamos de desloguear - si es así, no restaurar nada
+    const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
+    if (justLoggedOut && !isSignedIn) {
+      // Don't clear the flag here - let the useEffect handle it
+      return false;
+    }
+    
+    // Si el usuario no está autenticado, no restaurar desde localStorage
+    // Esto previene restaurar progreso antiguo después del logout
+    if (!isSignedIn) {
+      return false;
+    }
+
     try {
       // Intentar clave compartida primero (funciona entre idiomas)
       let savedState = localStorage.getItem(QUIZ_STORAGE_KEY);
@@ -97,101 +180,155 @@ export default function QuizEs() {
     }
   };
 
+  // Reiniciar progreso del quiz cuando el usuario se desloguea - DEBE ejecutarse ANTES del useEffect de restauración
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    // Solo reiniciar si el usuario estaba autenticado y ahora no lo está (logout real)
+    if (prevIsSignedInRef.current === true && !isSignedIn) {
+      // Establecer flag PRIMERO para evitar que restoreQuizState lea datos antiguos
+      sessionStorage.setItem('epa608_just_logged_out', 'true');
+      justLoggedOutRef.current = true;
+      // Limpiar localStorage para evitar que restoreQuizState lea datos antiguos
+      clearQuizState();
+      // Limpiar flag de redirect para evitar auto-redirect al quiz
+      localStorage.removeItem('epa608_redirect_after_auth');
+      // Reiniciar estado
+      setCurrentQuestionIndex(0);
+      setCorrectAnswers(0);
+      setAnsweredQuestions(0);
+      setAnswers([]);
+      setSelectedAnswer(null);
+      setShowExplanation(false);
+      setHasLoadedFromDatabase(false);
+      setIsRestoring(false);
+      
+      // Limpiar el flag después de un delay para permitir que restoreQuizState lo verifique
+      // Usar setTimeout para asegurar que todas las llamadas pendientes a restoreQuizState tengan oportunidad de verificar el flag
+      setTimeout(() => {
+        sessionStorage.removeItem('epa608_just_logged_out');
+        justLoggedOutRef.current = false;
+      }, 1000);
+    }
+
+    // Actualizar ref para rastrear el estado actual para el siguiente render
+    prevIsSignedInRef.current = isSignedIn;
+  }, [isLoaded, isSignedIn]);
+
   // Restaurar estado al montar y cuando el usuario inicia sesión
   useEffect(() => {
-    if (!isLoaded) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:101',message:'useEffect triggered but isLoaded is false',data:{isLoaded,isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
+    if (!isLoaded) return;
+
+    // Verificar si acabamos de desloguear - si es así, no restaurar nada
+    const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
+    if (justLoggedOut && !isSignedIn) {
+      // Don't clear the flag yet - keep it for restoreQuizState to check
+      setIsRestoring(false);
       return;
     }
-    
+
     // Verificar si tenemos una bandera de redirección de autenticación
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:107',message:'useEffect triggered - checking sync',data:{isLoaded,isSignedIn,hasRedirectFlag:!!redirectFlag,redirectFlag},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
+
     // Sincronizar usuario a la base de datos cuando inicia sesión (fallback si el webhook no está configurado)
     if (isSignedIn) {
       const syncKey = 'epa608_user_synced';
       const hasSynced = sessionStorage.getItem(syncKey);
       const syncInProgressKey = 'epa608_user_sync_in_progress';
       const syncInProgress = sessionStorage.getItem(syncInProgressKey);
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:115',message:'User is signed in, checking sync status',data:{isSignedIn,hasSynced,syncInProgress},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      
+
       if (!hasSynced && !syncInProgress) {
         // Marcar que la sincronización está en progreso para evitar llamadas duplicadas
         sessionStorage.setItem(syncInProgressKey, 'true');
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:118',message:'Starting user sync',data:{origin:window.location.origin,pathname:window.location.pathname},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
+
         fetch('/api/users/sync', {
           method: 'POST',
         })
           .then(async res => {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:123',message:'User sync response received',data:{status:res.status,ok:res.ok,contentType:res.headers.get('content-type')},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
-            
             // Verificar si la respuesta es HTML en lugar de JSON
             const contentType = res.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
-              // #region agent log
               const text = await res.text();
-              fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:128',message:'Response is not JSON',data:{status:res.status,contentType,preview:text.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
-              // #endregion
               throw new Error(`Expected JSON but got ${contentType || 'unknown'}. Status: ${res.status}`);
             }
             
             return res.json();
           })
-          .then(data => {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:137',message:'User sync data parsed',data:{success:data.success,hasUser:!!data.user,error:data.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
-            if (data.success) {
-              sessionStorage.setItem(syncKey, 'true');
+          .then(async (data) => {
+            if (data.success) sessionStorage.setItem(syncKey, 'true');
+            sessionStorage.removeItem(syncInProgressKey);
+            
+            // Después de sincronizar, cargar progreso desde la base de datos (priorizar DB sobre localStorage)
+            setIsLoadingFromDatabase(true);
+            const dbProgress = await loadProgressFromDatabase();
+            if (dbProgress) {
+              // Limpiar localStorage para evitar conflictos
+              clearQuizState();
+              setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+              setCorrectAnswers(dbProgress.correctAnswers);
+              setAnsweredQuestions(dbProgress.answeredQuestions);
+              setAnswers(dbProgress.answers);
+              // Actualizar localStorage con el progreso de DB
+              saveQuizState();
+            } else {
+              // No hay progreso en DB, intentar localStorage
+              restoreQuizState();
             }
-            // Remover la marca de sincronización en progreso
-            sessionStorage.removeItem(syncInProgressKey);
+            setIsLoadingFromDatabase(false);
+            setHasLoadedFromDatabase(true);
+            setIsRestoring(false);
           })
-          .catch(error => {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:144',message:'User sync error',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
+          .catch((error) => {
             console.error('Error syncing user:', error);
-            // Remover la marca de sincronización en progreso incluso si hay error
             sessionStorage.removeItem(syncInProgressKey);
+            // En caso de error, usar localStorage como respaldo
+            restoreQuizState();
+            setIsRestoring(false);
           });
+      } else if (hasSynced) {
+        // Usuario ya sincronizado, cargar progreso desde la base de datos
+        setIsLoadingFromDatabase(true);
+        loadProgressFromDatabase().then((dbProgress) => {
+          if (dbProgress) {
+            // Limpiar localStorage para evitar conflictos
+            clearQuizState();
+            setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+            setCorrectAnswers(dbProgress.correctAnswers);
+            setAnsweredQuestions(dbProgress.answeredQuestions);
+            setAnswers(dbProgress.answers);
+            saveQuizState();
+          } else {
+            restoreQuizState();
+          }
+          setIsLoadingFromDatabase(false);
+          setHasLoadedFromDatabase(true);
+          setIsRestoring(false);
+        }).catch(() => {
+          setIsLoadingFromDatabase(false);
+          setHasLoadedFromDatabase(true);
+          restoreQuizState();
+          setIsRestoring(false);
+        });
+      } else {
+        // Sincronización en progreso, esperar un poco e intentar localStorage
+        restoreQuizState();
+        setIsRestoring(false);
       }
     } else {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:140',message:'User is NOT signed in',data:{isSignedIn,isLoaded,hasRedirectFlag:!!redirectFlag},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
-    }
-    
-    if (redirectFlag) {
-      // Hay flag de redirect - restaurar estado del quiz
-      restoreQuizState();
-      // Remover el flag si el usuario está autenticado
-      if (isSignedIn) {
-        localStorage.removeItem('epa608_redirect_after_auth');
+      // No autenticado, verificar si acabamos de desloguear
+      const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out');
+      
+      // Si el usuario acabó de desloguear, no restaurar desde localStorage
+      if (justLoggedOut) {
+        // Don't clear the flag here - keep it for restoreQuizState to check
+        setIsRestoring(false);
+      } else if (redirectFlag) {
+        restoreQuizState();
+        setIsRestoring(false);
+      } else {
+        restoreQuizState();
+        setIsRestoring(false);
       }
-      setIsRestoring(false);
-    } else if (isSignedIn) {
-      // User is signed in but no redirect flag, try to restore anyway
-      restoreQuizState();
-      setIsRestoring(false);
-    } else {
-      // Not signed in, try to restore state (for users who might have state from before)
-      restoreQuizState();
-      setIsRestoring(false);
     }
   }, [isLoaded, isSignedIn]);
   
@@ -201,42 +338,32 @@ export default function QuizEs() {
     
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
     if (redirectFlag && !isSignedIn) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:147',message:'Polling: redirect flag exists but user not signed in',data:{redirectFlag,isSignedIn,isLoaded},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
-      
       // Forzar recarga del estado de autenticación después de un delay
       // Esto ayuda cuando Clerk tarda en actualizar el estado después del redirect
       const timeoutId = setTimeout(() => {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:153',message:'Timeout reached, checking if still not signed in before reload',data:{isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
         // Recargar la página si aún no está autenticado
         // Esto fuerza a Clerk a re-evaluar el estado de autenticación
         // Solo recargar si el flag todavía existe (no fue removido por otro proceso)
         if (!isSignedIn && localStorage.getItem('epa608_redirect_after_auth')) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:159',message:'Forcing page reload to refresh auth state',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-          // #endregion
           window.location.reload();
         }
       }, 2000);
       
       return () => clearTimeout(timeoutId);
     } else if (redirectFlag && isSignedIn) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz-es.js:167',message:'Polling: user signed in, removing redirect flag',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       localStorage.removeItem('epa608_redirect_after_auth');
     }
   }, [isLoaded, isSignedIn]);
+
 
   // Guardar estado cuando cambie (pero no durante la restauración)
   useEffect(() => {
     if (!isRestoring && isLoaded && currentQuestionIndex > 0) {
       saveQuizState();
+      // También guardar en la base de datos si el usuario está autenticado
+      saveProgressToDatabase();
     }
-  }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers]);
+  }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers, isSignedIn, isLoaded]);
 
   // Effect to show auth modal when reaching question 4 (index 3) and user is not signed in
   useEffect(() => {
