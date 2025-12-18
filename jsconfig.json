@@ -2,6 +2,8 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./*"]
-    }
-  }
+    },
+    "typeRoots": ["./types", "./node_modules/@types"]
+  },
+  "include": ["**/*.js", "**/*.jsx", "types/**/*.d.ts"]
 }

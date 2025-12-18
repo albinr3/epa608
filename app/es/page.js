@@ -736,21 +736,27 @@ export default function HomeEs() {
       <footer className="py-8 sm:py-12 px-4 sm:px-6 border-t border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-gray-600 text-xs sm:text-sm text-center md:text-left">
-            © {new Date().getFullYear()} HVAC Prep. Todos los derechos reservados.
+            © {new Date().getFullYear()} EPA608Practice.org. Todos los derechos reservados.
           </p>
           <div className="flex gap-4 sm:gap-6">
-            <a
-              href="#"
+            <Link
+              href="/es/contact"
+              className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
+            >
+              Contacto
+            </Link>
+            <Link
+              href="/es/terms"
               className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
             >
               Términos
-            </a>
-            <a
-              href="#"
+            </Link>
+            <Link
+              href="/es/privacy"
               className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
             >
               Privacidad
-            </a>
+            </Link>
         </div>
         </div>
       </footer>

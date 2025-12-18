@@ -32,8 +32,35 @@ export default function Quiz() {
   const prevIsSignedInRef = useRef(null);
   const justLoggedOutRef = useRef(false);
 
-  const currentQuestion = questions[currentQuestionIndex];
+  // #region agent log
+  // Filter questions based on user status (actual available questions)
+  const getAvailableQuestions = () => {
+    if (isPremium) {
+      return questions; // Premium users get all questions
+    }
+    if (!isSignedIn) {
+      return questions.slice(0, 3); // Non-logged users get first 3 (but UI shows 20)
+    }
+    return questions.slice(0, 20); // Logged non-premium users get first 20
+  };
+  
+  // Get the number of questions to display in UI (for progress display)
+  const getDisplayQuestionCount = () => {
+    if (isPremium) {
+      return questions.length; // Premium users see all questions
+    }
+    // For non-premium users (logged or not), show 20 in the UI
+    return 20;
+  };
+  
+  const availableQuestions = getAvailableQuestions();
+  const displayQuestionCount = getDisplayQuestionCount();
+  const currentQuestion = availableQuestions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
+  
+  // Log for debugging
+  fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:35',message:'Question filtering',data:{isPremium,isSignedIn,totalQuestions:questions.length,availableQuestionsCount:availableQuestions.length,displayQuestionCount,currentQuestionIndex,answeredQuestions,selectedAnswer,isAnswered,hasCurrentQuestion:!!currentQuestion},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
 
   // Calculate free questions answered (first 3)
   const freeQuestionsAnswered = Math.min(answeredQuestions, 3);
@@ -156,10 +183,30 @@ export default function Quiz() {
         // Only restore if state is recent (within last hour)
         const oneHour = 60 * 60 * 1000;
         if (Date.now() - quizState.timestamp < oneHour) {
-          setCurrentQuestionIndex(quizState.currentQuestionIndex || 0);
+          const restoredIndex = quizState.currentQuestionIndex || 0;
+          const restoredAnswers = quizState.answers || [];
+          
+          setCurrentQuestionIndex(restoredIndex);
           setCorrectAnswers(quizState.correctAnswers || 0);
           setAnsweredQuestions(quizState.answeredQuestions || 0);
-          setAnswers(quizState.answers || []);
+          setAnswers(restoredAnswers);
+          
+          // Restore selectedAnswer and showExplanation if there's an answer for current question
+          const currentAnswer = restoredAnswers[restoredIndex];
+          if (currentAnswer && currentAnswer.selectedOption !== undefined) {
+            setSelectedAnswer(currentAnswer.selectedOption);
+            setShowExplanation(true);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:189',message:'Restoring answer from localStorage',data:{restoredIndex,selectedOption:currentAnswer.selectedOption,hasAnswer:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+          } else {
+            setSelectedAnswer(null);
+            setShowExplanation(false);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:197',message:'No answer to restore from localStorage',data:{restoredIndex,hasAnswer:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+          }
+          
           return true;
         } else {
           // Clear old state from both keys
@@ -261,13 +308,46 @@ export default function Quiz() {
             setIsLoadingFromDatabase(true);
             const dbProgress = await loadProgressFromDatabase();
             if (dbProgress) {
+              // Try to get answers from localStorage before clearing
+              let localStorageAnswers = [];
+              try {
+                const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+                if (savedState) {
+                  const quizState = JSON.parse(savedState);
+                  localStorageAnswers = quizState.answers || [];
+                }
+              } catch (e) {
+                console.error("Error reading localStorage for answers:", e);
+              }
+              
               // Limpiar localStorage para evitar conflictos
               clearQuizState();
-              setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+              const restoredIndex = dbProgress.currentQuestionIndex;
+              // Use localStorage answers if available, otherwise use empty array from DB
+              const restoredAnswers = localStorageAnswers.length > 0 ? localStorageAnswers : (dbProgress.answers || []);
+              
+              setCurrentQuestionIndex(restoredIndex);
               setCorrectAnswers(dbProgress.correctAnswers);
               setAnsweredQuestions(dbProgress.answeredQuestions);
-              setAnswers(dbProgress.answers);
-              // Update localStorage with DB progress
+              setAnswers(restoredAnswers);
+              
+              // Restore selectedAnswer and showExplanation if there's an answer for current question
+              const currentAnswer = restoredAnswers[restoredIndex];
+              if (currentAnswer && currentAnswer.selectedOption !== undefined) {
+                setSelectedAnswer(currentAnswer.selectedOption);
+                setShowExplanation(true);
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:310',message:'Restoring answer from localStorage/DB after sync',data:{restoredIndex,selectedOption:currentAnswer.selectedOption,hasAnswer:true,fromLocalStorage:localStorageAnswers.length > 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
+              } else {
+                setSelectedAnswer(null);
+                setShowExplanation(false);
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:325',message:'No answer to restore from DB/localStorage after sync',data:{restoredIndex,hasAnswer:false,localStorageAnswersCount:localStorageAnswers.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
+              }
+              
+              // Update localStorage with DB progress and restored answers
               saveQuizState();
             } else {
               // No progress in DB, try localStorage
@@ -289,12 +369,45 @@ export default function Quiz() {
         setIsLoadingFromDatabase(true);
         loadProgressFromDatabase().then((dbProgress) => {
           if (dbProgress) {
+            // Try to get answers from localStorage before clearing
+            let localStorageAnswers = [];
+            try {
+              const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+              if (savedState) {
+                const quizState = JSON.parse(savedState);
+                localStorageAnswers = quizState.answers || [];
+              }
+            } catch (e) {
+              console.error("Error reading localStorage for answers:", e);
+            }
+            
             // Limpiar localStorage para evitar conflictos
             clearQuizState();
-            setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+            const restoredIndex = dbProgress.currentQuestionIndex;
+            // Use localStorage answers if available, otherwise use empty array from DB
+            const restoredAnswers = localStorageAnswers.length > 0 ? localStorageAnswers : (dbProgress.answers || []);
+            
+            setCurrentQuestionIndex(restoredIndex);
             setCorrectAnswers(dbProgress.correctAnswers);
             setAnsweredQuestions(dbProgress.answeredQuestions);
-            setAnswers(dbProgress.answers);
+            setAnswers(restoredAnswers);
+            
+            // Restore selectedAnswer and showExplanation if there's an answer for current question
+            const currentAnswer = restoredAnswers[restoredIndex];
+            if (currentAnswer && currentAnswer.selectedOption !== undefined) {
+              setSelectedAnswer(currentAnswer.selectedOption);
+              setShowExplanation(true);
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:360',message:'Restoring answer from localStorage/DB',data:{restoredIndex,selectedOption:currentAnswer.selectedOption,hasAnswer:true,fromLocalStorage:localStorageAnswers.length > 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+              // #endregion
+            } else {
+              setSelectedAnswer(null);
+              setShowExplanation(false);
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:375',message:'No answer to restore from DB/localStorage',data:{restoredIndex,hasAnswer:false,localStorageAnswersCount:localStorageAnswers.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+              // #endregion
+            }
+            
             saveQuizState();
           } else {
             restoreQuizState();
@@ -342,6 +455,30 @@ export default function Quiz() {
     }
   }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers, isSignedIn, isLoaded]);
 
+  // Effect to adjust currentQuestionIndex when available questions change
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    const getAvailableQuestionsCount = () => {
+      if (isPremium) return questions.length;
+      if (!isSignedIn) return 3;
+      return 20;
+    };
+    
+    const availableCount = getAvailableQuestionsCount();
+    
+    // If current index is beyond available questions, adjust it
+    if (currentQuestionIndex >= availableCount) {
+      // If user just logged in and was on question 3, keep them there
+      // Otherwise, set to the last available question
+      const newIndex = Math.min(currentQuestionIndex, availableCount - 1);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:346',message:'Adjusting question index',data:{oldIndex:currentQuestionIndex,newIndex,availableCount,isPremium,isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      setCurrentQuestionIndex(newIndex);
+    }
+  }, [isLoaded, isSignedIn, isPremium, currentQuestionIndex]);
+
   // Effect to show auth modal when reaching question 4 (index 3) and user is not signed in
   useEffect(() => {
     if (!isLoaded) return;
@@ -360,11 +497,15 @@ export default function Quiz() {
 
   // Effect to show modal when directly accessing premium question
   useEffect(() => {
-    const question = questions[currentQuestionIndex];
+    const question = availableQuestions[currentQuestionIndex];
     if (question && question.id === 21 && !isPremium) {
       setShowPremiumModal(true);
     }
-  }, [currentQuestionIndex, isPremium]);
+    // Also check if current question index is beyond available questions
+    if (currentQuestionIndex >= availableQuestions.length && !isPremium) {
+      setShowPremiumModal(true);
+    }
+  }, [currentQuestionIndex, isPremium, isSignedIn]);
 
   const handleAnswerClick = (optionIndex) => {
     if (isAnswered) return; // Don't allow changing answer after selecting
@@ -379,7 +520,13 @@ export default function Quiz() {
     }
 
     // Increment answered questions counter
-    setAnsweredQuestions((prev) => prev + 1);
+    setAnsweredQuestions((prev) => {
+      const newCount = prev + 1;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:382',message:'Answer submitted',data:{previousCount:prev,newCount,currentQuestionIndex,isCorrect:isCorrectAnswer},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      return newCount;
+    });
 
     // Save answer to answers array for persistence
     setAnswers((prev) => {
@@ -404,10 +551,16 @@ export default function Quiz() {
       return;
     }
 
+    // Check if next question is beyond available questions for non-premium users
+    if (nextIndex >= availableQuestions.length && !isPremium) {
+      setShowPremiumModal(true);
+      return;
+    }
+
     // Check if next question is #21 (id: 21) and user is not premium
     if (
-      nextIndex < questions.length &&
-      questions[nextIndex].id === 21 &&
+      nextIndex < availableQuestions.length &&
+      availableQuestions[nextIndex]?.id === 21 &&
       !isPremium
     ) {
       setShowPremiumModal(true);
@@ -415,7 +568,8 @@ export default function Quiz() {
     }
 
     // Advance to next question only if user is signed in (for question 4+) or if it's before question 4
-    if (nextIndex < questions.length) {
+    // Also check if next question is within available questions
+    if (nextIndex < availableQuestions.length) {
       // If trying to go to question 4+ and not signed in, don't advance
       if (nextIndex >= 3 && !isSignedIn) {
         setShowAuthModal(true);
@@ -439,6 +593,7 @@ export default function Quiz() {
     setShowPremiumModal(false);
     // Advance to next question after becoming premium
     const nextIndex = currentQuestionIndex + 1;
+    // After becoming premium, all questions are available
     if (nextIndex < questions.length) {
       setCurrentQuestionIndex(nextIndex);
       setSelectedAnswer(null);
@@ -446,6 +601,10 @@ export default function Quiz() {
     }
   };
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:449',message:'Current question check',data:{hasCurrentQuestion:!!currentQuestion,currentQuestionIndex,availableQuestionsLength:availableQuestions.length,answeredQuestions},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
+  
   if (!currentQuestion) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8 relative overflow-hidden">
@@ -579,7 +738,7 @@ export default function Quiz() {
           <div className="mb-8">
             <div className="flex justify-between items-center mb-2">
               <span className="text-gray-600 text-base font-medium">
-                Question {currentQuestionIndex + 1} of {questions.length}
+                Question {currentQuestionIndex + 1} of {displayQuestionCount}
               </span>
               {!isPremium && (
                 <span className="text-blue-600 text-base font-semibold">
@@ -591,7 +750,7 @@ export default function Quiz() {
               <div
                 className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                 style={{
-                  width: `${((currentQuestionIndex + 1) / questions.length) * 100}%`,
+                  width: `${((currentQuestionIndex + 1) / displayQuestionCount) * 100}%`,
                 }}
               />
             </div>
@@ -601,6 +760,21 @@ export default function Quiz() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             {/* Question Section - Takes 2 columns on desktop */}
             <div className="lg:col-span-2 order-1 bg-white border border-gray-200 rounded-xl p-6 md:p-8 shadow-sm">
+              {/* Image reference (if available) */}
+              {currentQuestion.image && (
+                <div className="mb-6 w-full">
+                  <div className="relative w-full h-auto rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                    <Image
+                      src={currentQuestion.image}
+                      alt="Question reference image"
+                      width={800}
+                      height={600}
+                      className="w-full h-auto object-contain"
+                      priority={currentQuestionIndex < 3}
+                    />
+                  </div>
+                </div>
+              )}
               <h2 className="text-xl md:text-2xl font-semibold text-slate-900 mb-6">
                 {currentQuestion.text}
               </h2>
@@ -683,7 +857,7 @@ export default function Quiz() {
                   onClick={handleNext}
                   className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl"
                 >
-                  {currentQuestionIndex + 1 < questions.length
+                  {currentQuestionIndex + 1 < displayQuestionCount
                     ? "Next"
                     : "Finish"}
                 </button>
@@ -700,24 +874,22 @@ export default function Quiz() {
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Completed:</span>
                     <span className="text-green-600 font-semibold">
-                      {currentQuestionIndex + 1}
+                      {answeredQuestions}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Remaining:</span>
                     <span className="text-blue-600 font-semibold">
-                      {questions.length - (currentQuestionIndex + 1)}
-                      {!isPremium && currentQuestionIndex + 1 < 20 && ` free`}
+                      {displayQuestionCount - answeredQuestions}
+                      {!isPremium && ` free`}
                     </span>
                   </div>
-                  {!isPremium && currentQuestionIndex + 1 >= 20 && (
-                    <div className="mt-3 pt-3 border-t border-gray-200">
-                      <p className="text-blue-600 text-xs text-center font-medium">
-                        💡 You've completed the free trial. Unlock more
-                        questions to continue.
-                      </p>
-                    </div>
-                  )}
+                  {/* #region agent log */}
+                  {(() => {
+                    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:786',message:'Progress display',data:{isSignedIn,isPremium,answeredQuestions,displayQuestionCount,availableQuestionsCount:availableQuestions.length,remaining:displayQuestionCount - answeredQuestions},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                    return null;
+                  })()}
+                  {/* #endregion */}
                 </div>
               </div>
             </div>

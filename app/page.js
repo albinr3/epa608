@@ -738,21 +738,27 @@ export default function Home() {
       <footer className="py-8 sm:py-12 px-4 sm:px-6 border-t border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-gray-600 text-xs sm:text-sm text-center md:text-left">
-            © 2024 HVAC Prep. All rights reserved.
+            © {new Date().getFullYear()} EPA608Practice.org. All rights reserved.
           </p>
           <div className="flex gap-4 sm:gap-6">
-            <a
-              href="#"
+            <Link
+              href="/contact"
+              className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
+            >
+              Contact
+            </Link>
+            <Link
+              href="/terms"
               className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
             >
               Terms
-            </a>
-            <a
-              href="#"
+            </Link>
+            <Link
+              href="/privacy"
               className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
             >
               Privacy
-            </a>
+            </Link>
         </div>
         </div>
       </footer>
