@@ -84,18 +84,18 @@ export default function PricingPageEs() {
             © {new Date().getFullYear()} HVAC Prep. Todos los derechos reservados.
           </p>
           <div className="flex gap-4 sm:gap-6">
-            <a
-              href="#"
+            <Link
+              href="/es/terms"
               className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
             >
               Términos
-            </a>
-            <a
-              href="#"
+            </Link>
+            <Link
+              href="/es/privacy"
               className="text-gray-600 hover:text-blue-600 text-xs sm:text-sm transition-colors duration-300"
             >
               Privacidad
-            </a>
+            </Link>
           </div>
         </div>
       </footer>

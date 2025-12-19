@@ -56,7 +56,10 @@ export default function TermsPage() {
           <section>
             <h2 className="text-2xl font-bold text-slate-900 mb-4">4. Subscription and Payment</h2>
             <p className="leading-relaxed mb-4">
-              Some features of the Service may require payment. By subscribing to a paid plan, you agree to pay the fees specified at the time of purchase. All fees are non-refundable except as required by law or as explicitly stated in our refund policy.
+              Some features of the Service may require payment. By subscribing to a paid plan, you agree to pay the fees specified at the time of purchase. All fees are non-refundable except as required by law or as explicitly stated in our <Link href="/refund" className="text-blue-600 hover:text-blue-700 underline">Refund Policy</Link>.
+            </p>
+            <p className="leading-relaxed mb-4">
+              We offer a 30-day money-back guarantee. If you are not satisfied with your purchase or do not pass your EPA 608 certification exam after using our platform, you may be eligible for a full refund. Please review our <Link href="/refund" className="text-blue-600 hover:text-blue-700 underline">Refund Policy</Link> for complete details, terms, and conditions.
             </p>
             <p className="leading-relaxed mb-4">
               We reserve the right to change our pricing at any time. Price changes will not affect existing subscriptions until the next billing cycle.

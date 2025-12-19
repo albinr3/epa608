@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 export const metadata = {
   title: "Simulador EPA 608 en Español | Preguntas Reales y Explicaciones | HVAC Prep",
   description:
-    "Simulador interactivo EPA 608 en español: practica con preguntas tipo examen, corrección inmediata, explicaciones claras y modo examen real. Empieza gratis (20 preguntas) y desbloquea 300+ por $12.",
+    "Simulador interactivo EPA 608 en español: practica con preguntas tipo examen, corrección inmediata, explicaciones claras y modo examen real. Empieza gratis (20 preguntas) y desbloquea 300+ por $9.99.",
   keywords: [
     "simulador EPA 608 en español",
     "EPA 608 en español",

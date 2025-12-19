@@ -56,7 +56,10 @@ export default function TermsPage() {
           <section>
             <h2 className="text-2xl font-bold text-slate-900 mb-4">4. Suscripción y Pago</h2>
             <p className="leading-relaxed mb-4">
-              Algunas funciones del Servicio pueden requerir pago. Al suscribirse a un plan de pago, usted acepta pagar las tarifas especificadas en el momento de la compra. Todas las tarifas no son reembolsables excepto según lo requiera la ley o como se establezca explícitamente en nuestra política de reembolso.
+              Algunas funciones del Servicio pueden requerir pago. Al suscribirse a un plan de pago, usted acepta pagar las tarifas especificadas en el momento de la compra. Todas las tarifas no son reembolsables excepto según lo requiera la ley o como se establezca explícitamente en nuestra <Link href="/es/refund" className="text-blue-600 hover:text-blue-700 underline">Política de Reembolso</Link>.
+            </p>
+            <p className="leading-relaxed mb-4">
+              Ofrecemos una garantía de devolución de dinero de 30 días. Si no está satisfecho con su compra o no aprueba su examen de certificación EPA 608 después de usar nuestra plataforma, puede ser elegible para un reembolso completo. Por favor revise nuestra <Link href="/es/refund" className="text-blue-600 hover:text-blue-700 underline">Política de Reembolso</Link> para detalles completos, términos y condiciones.
             </p>
             <p className="leading-relaxed mb-4">
               Nos reservamos el derecho de cambiar nuestros precios en cualquier momento. Los cambios de precio no afectarán las suscripciones existentes hasta el próximo ciclo de facturación.

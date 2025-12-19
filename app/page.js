@@ -290,6 +290,28 @@ export default function Home() {
           <p className="text-xs sm:text-sm text-gray-500">
             No credit card required • 20 free questions
           </p>
+
+          {/* Statistics Badges - Centered below button */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4 mt-6 sm:mt-8 md:mt-12 max-w-4xl mx-auto px-2">
+            <div className="bg-yellow-100 border border-yellow-200 rounded-lg sm:rounded-xl md:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
+              <div className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-slate-900 mb-1 sm:mb-2">97%</div>
+              <div className="text-xs sm:text-sm md:text-base font-medium text-slate-700 leading-tight">Leading pass rate</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg sm:rounded-xl md:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
+              <div className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-blue-600 mb-1 sm:mb-2">300+</div>
+              <div className="text-xs sm:text-sm md:text-base font-medium text-gray-600 leading-tight">Available questions</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg sm:rounded-xl md:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
+              <div className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-purple-600 mb-1 sm:mb-2">
+                200+
+              </div>
+              <div className="text-xs sm:text-sm md:text-base font-medium text-gray-600 leading-tight">Technicians helped</div>
+            </div>
+            <div className="bg-pink-100 border border-pink-200 rounded-lg sm:rounded-xl md:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
+              <div className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-slate-900 mb-1 sm:mb-2">2025</div>
+              <div className="text-xs sm:text-sm md:text-base font-medium text-slate-700 leading-tight">Updated</div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -533,7 +555,7 @@ export default function Home() {
                 ))}
               </div>
               <p className="text-sm sm:text-base md:text-lg text-gray-700 mb-3 sm:mb-4 leading-relaxed">
-                "Best $12 I've spent on exam prep. The interface is clean, the questions are accurate, and the explanations are spot-on."
+                "Best $29.99 I've spent on exam prep. The interface is clean, the questions are accurate, and the explanations are spot-on."
               </p>
               <p className="text-xs sm:text-sm font-semibold text-gray-900">— Carlos R., HVAC Installer</p>
             </div>
@@ -688,7 +710,7 @@ export default function Home() {
             />
             <FAQItem
               question="Can I practice for free before paying?"
-              answer="Yes, we offer a free trial with the first 3 exam questions. This allows you to experience our simulator and see the quality of our explanations before unlocking the remaining 300+ questions for just $12."
+              answer="Yes, we offer a free trial with the first 20 exam questions. This allows you to experience our simulator and see the quality of our explanations before unlocking the remaining 300+ questions for just $9.99."
             />
           </div>
         </div>

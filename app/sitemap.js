@@ -1,55 +1,50 @@
 export default function sitemap() {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://tu-dominio.com';
+  // Obtener baseUrl y eliminar trailing slash si existe
+  let baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+  baseUrl = baseUrl.replace(/\/$/, '');
+
+  const now = new Date();
 
   return [
     {
       url: baseUrl,
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 1,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/pricing`,
+      lastModified: now,
     },
     {
       url: `${baseUrl}/terms`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.5,
+      lastModified: now,
     },
     {
       url: `${baseUrl}/privacy`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.5,
-    },
-    {
-      url: `${baseUrl}/es`,
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 1,
-    },
-    {
-      url: `${baseUrl}/es/terms`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.5,
-    },
-    {
-      url: `${baseUrl}/es/privacy`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.5,
+      lastModified: now,
     },
     {
       url: `${baseUrl}/contact`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.7,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/es`,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/es/pricing`,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/es/terms`,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/es/privacy`,
+      lastModified: now,
     },
     {
       url: `${baseUrl}/es/contact`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.7,
+      lastModified: now,
     },
   ];
 }
-

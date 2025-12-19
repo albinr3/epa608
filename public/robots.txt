@@ -1,5 +1,10 @@
+# This file is a fallback. Next.js will use app/robots.js if it exists.
+# For dynamic robots.txt, see app/robots.js
+
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /sso-callback
 
 Sitemap: https://tu-dominio.com/sitemap.xml
 

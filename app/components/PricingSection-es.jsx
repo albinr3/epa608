@@ -6,7 +6,7 @@ export default function PricingSectionEs({
   badge = "⚡ OFERTA FLASH: 60% DE DESCUENTO",
   title = "Acceso de Por Vida",
   oldPrice = "$29.99",
-  price = "$11.99",
+  price = "$9.99",
   priceDescription = "Pago único. Sin suscripciones mensuales.",
   features = [
     "Acceso ilimitado al Simulador",

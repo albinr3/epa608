@@ -20,7 +20,7 @@ export default function ContactPage() {
 
   useEffect(() => {
     // Verificar si reCAPTCHA ya está cargado
-    if (typeof window !== 'undefined' && window.grecaptcha && window.grecaptcha.enterprise) {
+    if (typeof window !== 'undefined' && window.grecaptcha) {
       setRecaptchaLoaded(true);
     }
   }, []);
@@ -38,10 +38,10 @@ export default function ContactPage() {
     setStatus({ type: null, message: '' });
 
     try {
-      // Ejecutar reCAPTCHA Enterprise
+      // Ejecutar reCAPTCHA v3
       let recaptchaToken = '';
-      if (window.grecaptcha && window.grecaptcha.enterprise) {
-        recaptchaToken = await window.grecaptcha.enterprise.execute(RECAPTCHA_SITE_KEY, {
+      if (window.grecaptcha) {
+        recaptchaToken = await window.grecaptcha.execute(RECAPTCHA_SITE_KEY, {
           action: 'contact_form'
         });
       } else {
@@ -91,7 +91,7 @@ export default function ContactPage() {
   return (
     <>
       <Script
-        src={`https://www.google.com/recaptcha/enterprise.js?render=${RECAPTCHA_SITE_KEY}`}
+        src={`https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`}
         strategy="lazyOnload"
         onLoad={() => {
           setRecaptchaLoaded(true);

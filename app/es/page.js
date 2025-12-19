@@ -290,9 +290,9 @@ export default function HomeEs() {
             </div>
             <div className="bg-white border border-gray-200 rounded-lg sm:rounded-xl md:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
               <div className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-purple-600 mb-1 sm:mb-2">
-                <LiveCounter initial={0} />
+                200+
               </div>
-              <div className="text-xs sm:text-sm md:text-base font-medium text-gray-600 leading-tight">Técnicos hoy</div>
+              <div className="text-xs sm:text-sm md:text-base font-medium text-gray-600 leading-tight">Técnicos ayudados</div>
             </div>
             <div className="bg-pink-100 border border-pink-200 rounded-lg sm:rounded-xl md:rounded-2xl p-3 sm:p-4 md:p-6 shadow-sm">
               <div className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-slate-900 mb-1 sm:mb-2">2025</div>
