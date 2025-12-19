@@ -26,12 +26,14 @@ export default function PricingPageEs() {
             />
           </Link>
           <div className="flex items-center gap-3 sm:gap-4 md:gap-6 flex-wrap">
-            <Link
-              href="/es/pricing"
-              className="text-base sm:text-lg md:text-xl lg:text-2xl text-blue-600 font-semibold transition-colors duration-300"
-            >
-              Precios
-            </Link>
+            {!isSignedIn && (
+              <Link
+                href="/es/pricing"
+                className="text-base sm:text-lg md:text-xl lg:text-2xl text-blue-600 font-semibold transition-colors duration-300"
+              >
+                Precios
+              </Link>
+            )}
             <Link
               href="/es"
               onClick={() => {

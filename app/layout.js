@@ -2,6 +2,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LangSetter from "./components/LangSetter";
 import ClerkProviderWrapper from "./components/ClerkProviderWrapper";
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 // Compute baseUrl and trim trailing slash
 const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '');
