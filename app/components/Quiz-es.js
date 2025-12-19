@@ -676,15 +676,50 @@ export default function QuizEs() {
       }
     };
 
+    // IMPORTANTE (bug corregido: modal de autenticación faltante en ES):
+    // - En un bug previo, la versión en español permitía avanzar a la pregunta 4 (índice 3) sin autenticación.
+    // - La versión en inglés (Quiz.js) SÍ verifica `nextIndex === 3 && !isSignedIn && isLoaded` antes de avanzar.
+    // - Esta verificación debe estar presente en AMBAS versiones para mantener consistencia.
+    // - Si modificas esta lógica en el futuro, asegúrate de aplicar el cambio en AMBOS archivos (Quiz.js y Quiz-es.js).
+    //
+    // Verificar si la siguiente pregunta es #4 (índice 3) y el usuario no está autenticado
+    // Pausar el quiz y mostrar modal de autenticación
+    if (nextIndex === 3 && !isSignedIn && isLoaded) {
+      setShowAuthModal(true);
+      // No avanzar - pausar el quiz
+      // Pero aún guardar el progreso de la pregunta actual
+      saveQuizState();
+      persistProgress();
+      return;
+    }
+
     // AHÍ incrementar contadores
     setAnsweredQuestions((prev) => prev + 1);
     if (isCorrect) {
       setCorrectAnswers((prev) => prev + 1);
     }
 
-    
-    // Avanzar a la siguiente pregunta
-    if (nextIndex < questions.length) {
+    // Verificar si la siguiente pregunta está más allá de las preguntas disponibles para usuarios no premium
+    // CRITICAL FIX: No mostrar modal premium si aún estamos restaurando estado
+    if (nextIndex >= availableQuestions.length && !isPremium && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
+      setShowPremiumModal(true);
+      // Guardar progreso antes de mostrar modal
+      saveQuizState();
+      persistProgress();
+      return;
+    }
+
+    // Avanzar a la siguiente pregunta solo si el usuario está autenticado (para pregunta 4+) o si es antes de la pregunta 4
+    // También verificar si la siguiente pregunta está dentro de las preguntas disponibles
+    if (nextIndex < availableQuestions.length) {
+      // Si intenta ir a pregunta 4+ y no está autenticado, no avanzar
+      if (nextIndex >= 3 && !isSignedIn) {
+        setShowAuthModal(true);
+        // Guardar progreso antes de mostrar modal
+        saveQuizState();
+        persistProgress();
+        return;
+      }
       // Avanzar índice
       setCurrentQuestionIndex(nextIndex);
       setSelectedAnswer(null);
