@@ -99,7 +99,8 @@ export default function HomeEs() {
     if (isSignedIn && redirectFlag) {
       // User just authenticated, show quiz and restore state
       setShowQuiz(true);
-      // Don't remove the flag yet - let Quiz component handle it
+      // Remover el flag inmediatamente para que al volver a la landing no se abra el quiz otra vez
+      localStorage.removeItem('epa608_redirect_after_auth');
     } else if (redirectFlag && !isSignedIn) {
       // Si hay flag pero el usuario no está autenticado, limpiar el flag
       // Esto puede pasar si el usuario se deslogueó

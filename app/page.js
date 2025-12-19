@@ -8,7 +8,6 @@ import { Timer, BookOpen, ShieldCheck, Building2, Users, Award, CheckCircle2, Tr
 import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import Quiz from './components/Quiz';
 import LanguageSelector from './components/LanguageSelector';
-import { questions } from './data-en'; // <--- AGREGA ESTO
 // Componente para contador en tiempo real
 function LiveCounter({ initial = 0 }) {
   const [count, setCount] = useState(initial);
@@ -97,7 +96,8 @@ export default function Home() {
     // Esto evita que se muestre el quiz cuando el usuario se desloguea
     if (redirectFlag && isSignedIn) {
       setShowQuiz(true);
-      // No remover el flag todavía - el Quiz lo manejará cuando confirme la autenticación
+      // Remover el flag inmediatamente para que al volver a la landing no se abra el quiz otra vez
+      localStorage.removeItem('epa608_redirect_after_auth');
     } else if (redirectFlag && !isSignedIn) {
       // Si hay flag pero el usuario no está autenticado, limpiar el flag
       // Esto puede pasar si el usuario se deslogueó

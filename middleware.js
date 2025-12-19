@@ -7,11 +7,18 @@ const isPublicRoute = createRouteMatcher([
   "/pricing",
   "/es",
   "/es/pricing",
+  "/terms",
+  "/privacy",
+  "/contact",
+  "/es/terms",
+  "/es/privacy",
+  "/es/contact",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/sso-callback", // Ruta de callback de OAuth de Clerk
   "/api/webhooks(.*)", // <--- ESTO ES LO IMPORTANTE
   "/api/users/sync", // Permitir que pase sin auth.protect(), la autenticación se verifica en el endpoint
+  "/api/questions", // API pública para obtener preguntas (la autenticación se verifica dentro)
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

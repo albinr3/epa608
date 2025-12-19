@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
+// Bloquear en producción
 export async function GET() {
+  // Solo permitir en desarrollo
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { error: 'Not available in production' },
+      { status: 403 }
+    );
+  }
   try {
     // Intentamos pedir 1 usuario. 
     // Si la tabla está vacía, devolverá [] (array vacío), lo cual ES ÉXITO.

@@ -6,7 +6,6 @@ import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { questions } from "../data-en";
 import AuthModal from "./AuthModal";
 import LanguageSelector from "./LanguageSelector";
 
@@ -31,36 +30,112 @@ export default function Quiz() {
   const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
   const prevIsSignedInRef = useRef(null);
   const justLoggedOutRef = useRef(false);
+  const isLoadingFromDatabaseRef = useRef(false); // Prevenir loop infinito
+  const isSavingRef = useRef(false); // Prevenir doble guardado en handleNext
+  const hasRestoredRef = useRef(false); // Prevenir restauración repetida mientras el usuario responde
+  const prevSignedInForRestoreRef = useRef(null); // Resetear restore guard al cambiar auth state
+  
+  // Estado para preguntas cargadas desde la API
+  const [questions, setQuestions] = useState([]);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
+  const [questionsError, setQuestionsError] = useState(null);
+  const [limitApplied, setLimitApplied] = useState(3);
+  
+  // Refs para prevenir múltiples fetches
+  const hasLoadedQuestionsRef = useRef(false);
+  const isLoadingQuestionsRef = useRef(false);
+  const loadQuestionsKeyRef = useRef(null);
+  const prevIsSignedInForQuestionsRef = useRef(isSignedIn);
 
-  // #region agent log
-  // Filter questions based on user status (actual available questions)
-  const getAvailableQuestions = () => {
-    if (isPremium) {
-      return questions; // Premium users get all questions
+  // Cargar preguntas desde la API (solo una vez por combinación de parámetros)
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    // Si isSignedIn cambió de false a true, resetear ref para forzar recarga
+    if (prevIsSignedInForQuestionsRef.current === false && isSignedIn === true) {
+      hasLoadedQuestionsRef.current = false;
     }
-    if (!isSignedIn) {
-      return questions.slice(0, 3); // Non-logged users get first 3 (but UI shows 20)
+    prevIsSignedInForQuestionsRef.current = isSignedIn;
+    
+    // Crear una key única para esta combinación de parámetros
+    const loadKey = `${isSignedIn ? 'auth' : 'anon'}-${isSpanish ? 'es' : 'en'}`;
+    
+    // Si ya se cargaron preguntas para esta key, no volver a cargar
+    if (hasLoadedQuestionsRef.current === loadKey) {
+      setIsLoadingQuestions(false);
+      return;
     }
-    return questions.slice(0, 20); // Logged non-premium users get first 20
-  };
-  
-  // Get the number of questions to display in UI (for progress display)
-  const getDisplayQuestionCount = () => {
-    if (isPremium) {
-      return questions.length; // Premium users see all questions
+    
+    // Si ya hay una carga en progreso para la misma key, no iniciar otra
+    if (isLoadingQuestionsRef.current && loadQuestionsKeyRef.current === loadKey) {
+      return;
     }
-    // For non-premium users (logged or not), show 20 in the UI
-    return 20;
-  };
-  
-  const availableQuestions = getAvailableQuestions();
-  const displayQuestionCount = getDisplayQuestionCount();
+
+    // Marcar inmediatamente que estamos cargando (antes del async)
+    isLoadingQuestionsRef.current = true;
+    loadQuestionsKeyRef.current = loadKey;
+
+    const loadQuestions = async () => {
+      setIsLoadingQuestions(true);
+      setQuestionsError(null);
+      
+      try {
+        const lang = isSpanish ? 'es' : 'en';
+        const response = await fetch(`/api/questions?lang=${lang}&category=ALL`, { 
+          cache: 'no-store' 
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to load questions: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+          setQuestions(data.questions || []);
+          setIsPremium(data.isPremium || false);
+          setLimitApplied(data.limitApplied || 3);
+          // Marcar que ya se cargaron para esta key
+          hasLoadedQuestionsRef.current = loadKey;
+        } else {
+          throw new Error(data.error || 'Failed to load questions');
+        }
+      } catch (error) {
+        console.error('Error loading questions:', error);
+        setQuestionsError(error.message);
+        // Si hay error, permitir reintento (resetear la key)
+        hasLoadedQuestionsRef.current = null;
+      } finally {
+        setIsLoadingQuestions(false);
+        isLoadingQuestionsRef.current = false;
+        // Solo limpiar la key si no es la misma que estamos cargando
+        if (loadQuestionsKeyRef.current === loadKey) {
+          loadQuestionsKeyRef.current = null;
+        }
+      }
+    };
+
+    loadQuestions();
+    
+    // Cleanup: si el componente se desmonta o cambian las dependencias antes de completar
+    return () => {
+      // No limpiar hasLoadedQuestionsRef aquí porque queremos mantener el cache
+      // Solo limpiar si cambió la key
+      if (loadQuestionsKeyRef.current === loadKey) {
+        isLoadingQuestionsRef.current = false;
+        loadQuestionsKeyRef.current = null;
+      }
+    };
+  }, [isLoaded, isSignedIn, isSpanish]);
+
+  const availableQuestions = questions;
+  // Para el UI: usuarios anónimos ven 20 preguntas, aunque solo tengan acceso a 3
+  // Para usuarios logueados no premium: 20, para premium: todas
+  const displayQuestionCount = isPremium 
+    ? (limitApplied === Infinity ? questions.length : limitApplied)
+    : (!isSignedIn ? 20 : (limitApplied === Infinity ? questions.length : limitApplied));
   const currentQuestion = availableQuestions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
-  
-  // Log for debugging
-  fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:35',message:'Question filtering',data:{isPremium,isSignedIn,totalQuestions:questions.length,availableQuestionsCount:availableQuestions.length,displayQuestionCount,currentQuestionIndex,answeredQuestions,selectedAnswer,isAnswered,hasCurrentQuestion:!!currentQuestion},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
 
   // Calculate free questions answered (first 3)
   const freeQuestionsAnswered = Math.min(answeredQuestions, 3);
@@ -70,14 +145,17 @@ export default function Quiz() {
     ? answeredQuestions
     : freeQuestionsAnswered;
 
+
   // Save quiz state to localStorage (save to shared key so progress persists across languages)
   const saveQuizState = () => {
     try {
+      // Filter out nulls and invalid entries before saving
+      const compact = Array.isArray(answers) ? answers.filter(a => a != null && a.questionId != null) : [];
       const quizState = {
         currentQuestionIndex,
         correctAnswers,
         answeredQuestions,
-        answers,
+        answers: compact,
         timestamp: Date.now(),
       };
       // Save to shared key so progress persists across languages
@@ -90,22 +168,34 @@ export default function Quiz() {
   };
 
   // Save quiz progress to Supabase
-  const saveProgressToDatabase = async () => {
+  //
+  // IMPORTANTE (regresión evitada: "10 vs 11" entre computadoras):
+  // - En un bug previo, el progreso guardado quedaba "1 por detrás" en otra computadora.
+  // - Causa: en React, `setAnsweredQuestions(prev => prev + 1)` y `setCorrectAnswers(...)` son async.
+  //   Si hacemos el POST usando `answeredQuestions` / `correctAnswers` del state actual, el backend recibe
+  //   el valor anterior (ej: envía 10 cuando el usuario ya respondió 11).
+  // - Solución: `saveProgressToDatabase(override)` permite enviar un payload explícito con los valores
+  //   "post-respuesta" calculados en `handleNext` (answered+1, correct+1 si aplica, nextIndex).
+  //
+  // Si en el futuro cambias `handleNext`, asegúrate de no volver a enviar al backend valores "stale".
+  const saveProgressToDatabase = async (override) => {
     if (!isSignedIn || !isLoaded || isLoadingFromDatabase || !hasLoadedFromDatabase) {
       return;
     }
 
     try {
+      // Usar override si se provee (valores post-respuesta) para evitar state lag.
+      const payload = {
+        currentQuestionIndex: typeof override?.currentQuestionIndex === 'number' ? override.currentQuestionIndex : currentQuestionIndex,
+        correctAnswers: typeof override?.correctAnswers === 'number' ? override.correctAnswers : correctAnswers,
+        totalAnswered: typeof override?.totalAnswered === 'number' ? override.totalAnswered : answeredQuestions,
+      };
       const response = await fetch('/api/quiz/progress', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          currentQuestionIndex,
-          correctAnswers,
-          totalAnswered: answeredQuestions,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -183,28 +273,74 @@ export default function Quiz() {
         // Only restore if state is recent (within last hour)
         const oneHour = 60 * 60 * 1000;
         if (Date.now() - quizState.timestamp < oneHour) {
-          const restoredIndex = quizState.currentQuestionIndex || 0;
-          const restoredAnswers = quizState.answers || [];
+          // CRITICAL FIX: Don't restore if questions haven't loaded yet
+          // This prevents restoring with availableQuestions.length === 0, which causes index -1
+          if (availableQuestions.length === 0 || isLoadingQuestions) {
+            return false; // Return false to indicate we need to wait
+          }
+          
+          const rawRestoredAnswers = quizState.answers || [];
+          // Filter out nulls and invalid entries to ensure safe access
+          const restoredAnswers = Array.isArray(rawRestoredAnswers) 
+            ? rawRestoredAnswers.filter(a => a != null && a.questionId != null)
+            : [];
+          
+          // Find the correct index based on source_id of the last answered question
+          // This fixes Bug 1: when questions change after login, we need to find the right question
+          let restoredIndex = 0;
+          if (restoredAnswers.length > 0 && availableQuestions.length > 0) {
+            // Find the last answered question's source_id
+            const lastAnsweredIndex = restoredAnswers.length - 1;
+            const lastAnsweredQuestionId = restoredAnswers[lastAnsweredIndex]?.questionId;
+            
+            if (lastAnsweredQuestionId !== undefined) {
+              // Find the index of this question in the new questions array
+              const foundIndex = availableQuestions.findIndex(q => q.source_id === lastAnsweredQuestionId);
+              if (foundIndex !== -1) {
+                // If we found the question, go to the next one (since they already answered it)
+                restoredIndex = Math.min(foundIndex + 1, availableQuestions.length - 1);
+              } else {
+                // If question not found, find the first unanswered question
+                const answeredQuestionIds = new Set(restoredAnswers.map(a => a?.questionId).filter(Boolean));
+                const firstUnansweredIndex = availableQuestions.findIndex(q => !answeredQuestionIds.has(q.source_id));
+                restoredIndex = firstUnansweredIndex !== -1 ? firstUnansweredIndex : 0;
+              }
+            } else {
+              // Fallback: use the saved index, but clamp it to valid range
+              restoredIndex = Math.min(quizState.currentQuestionIndex || 0, availableQuestions.length - 1);
+            }
+          } else {
+            restoredIndex = Math.min(quizState.currentQuestionIndex || 0, availableQuestions.length - 1);
+          }
+          
+          // Ensure restoredIndex is valid (>= 0)
+          if (restoredIndex < 0) {
+            restoredIndex = 0;
+          }
           
           setCurrentQuestionIndex(restoredIndex);
           setCorrectAnswers(quizState.correctAnswers || 0);
-          setAnsweredQuestions(quizState.answeredQuestions || 0);
+          // CRITICAL FIX: Calculate answeredQuestions from restoredAnswers if localStorage value is 0 or missing
+          // This ensures the counter is correct even if the localStorage value is stale
+          let calculatedAnsweredQuestions = 0;
+          if (restoredAnswers.length > 0) {
+            const safeAnswers = Array.isArray(restoredAnswers) ? restoredAnswers : [];
+            calculatedAnsweredQuestions = safeAnswers.filter(a => a?.selectedOption !== null && a?.selectedOption !== undefined).length;
+          } else {
+            calculatedAnsweredQuestions = quizState.answeredQuestions || 0;
+          }
+          setAnsweredQuestions(calculatedAnsweredQuestions);
           setAnswers(restoredAnswers);
           
           // Restore selectedAnswer and showExplanation if there's an answer for current question
-          const currentAnswer = restoredAnswers[restoredIndex];
-          if (currentAnswer && currentAnswer.selectedOption !== undefined) {
+          const currentQuestion = availableQuestions[restoredIndex];
+          const currentAnswer = currentQuestion ? restoredAnswers.find(a => a?.questionId === currentQuestion.source_id) : null;
+          if (currentAnswer && currentAnswer?.selectedOption !== undefined) {
             setSelectedAnswer(currentAnswer.selectedOption);
             setShowExplanation(true);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:189',message:'Restoring answer from localStorage',data:{restoredIndex,selectedOption:currentAnswer.selectedOption,hasAnswer:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-            // #endregion
           } else {
             setSelectedAnswer(null);
             setShowExplanation(false);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:197',message:'No answer to restore from localStorage',data:{restoredIndex,hasAnswer:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-            // #endregion
           }
           
           return true;
@@ -254,6 +390,7 @@ export default function Quiz() {
       setShowExplanation(false);
       setHasLoadedFromDatabase(false);
       setIsRestoring(false);
+      hasRestoredRef.current = false;
       
       // Clear the flag after a delay to allow restoreQuizState to check it
       // Use setTimeout to ensure all pending restoreQuizState calls have a chance to check the flag
@@ -270,6 +407,29 @@ export default function Quiz() {
   // Restore state on mount and when user signs in
   useEffect(() => {
     if (!isLoaded) return;
+    // IMPORTANTE (regresión evitada):
+    // - Cuando el usuario pasa de ANÓNIMO -> LOGUEADO, queremos "migrar" el progreso (las 3 anónimas)
+    //   a la sesión autenticada y continuar en la pregunta 4.
+    // - En un bug previo, `hasRestoredRef` se marcaba/consultaba demasiado pronto (cuando aún no habían
+    //   preguntas cargadas), y el effect se salteaba la restauración post-login, reiniciando en la pregunta 1.
+    // Por eso:
+    // - Reseteamos el guard cuando cambia `isSignedIn`
+    // - Y NO bloqueamos este effect mientras `availableQuestions` está vacío o `isLoadingQuestions=true`.
+    //
+    // Si tocas esta lógica en el futuro, asegúrate de no "quemar" la restauración antes de que existan preguntas.
+    // Si el usuario se loguea después de 3 anónimas, debe continuar en la pregunta 4.
+    //
+    // Si cambia el estado de auth (anon -> signed in o viceversa), permitir una restauración
+    if (prevSignedInForRestoreRef.current !== isSignedIn) {
+      hasRestoredRef.current = false;
+      prevSignedInForRestoreRef.current = isSignedIn;
+    }
+    // Prevenir restauración repetida (por ejemplo, mientras el usuario responde)
+    // IMPORTANTE: no bloquear mientras las preguntas aún no cargaron, o se puede perder la migración post-login
+    if (hasRestoredRef.current && availableQuestions.length > 0 && !isLoadingQuestions && !isLoadingFromDatabase) {
+      setIsRestoring(false);
+      return;
+    }
 
     // Check if we just logged out - if so, don't restore anything
     const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
@@ -305,46 +465,107 @@ export default function Quiz() {
             sessionStorage.removeItem(syncInProgressKey);
             
             // After syncing, load progress from database (prioritize DB over localStorage)
+            isLoadingFromDatabaseRef.current = true; // Set ref FIRST
             setIsLoadingFromDatabase(true);
             const dbProgress = await loadProgressFromDatabase();
             if (dbProgress) {
-              // Try to get answers from localStorage before clearing
-              let localStorageAnswers = [];
-              try {
-                const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
-                if (savedState) {
-                  const quizState = JSON.parse(savedState);
-                  localStorageAnswers = quizState.answers || [];
-                }
-              } catch (e) {
-                console.error("Error reading localStorage for answers:", e);
+              // CRITICAL FIX: Wait for questions to load before restoring
+              if (availableQuestions.length === 0 || isLoadingQuestions) {
+                setIsLoadingFromDatabase(false);
+                setHasLoadedFromDatabase(true);
+                setIsRestoring(false);
+                isLoadingFromDatabaseRef.current = false; // Clear ref
+                return; // Wait for questions to load, then restore will happen in next useEffect cycle
               }
               
-              // Limpiar localStorage para evitar conflictos
-              clearQuizState();
-              const restoredIndex = dbProgress.currentQuestionIndex;
-              // Use localStorage answers if available, otherwise use empty array from DB
-              const restoredAnswers = localStorageAnswers.length > 0 ? localStorageAnswers : (dbProgress.answers || []);
+              // Define server progress values
+              const serverAnswered = dbProgress.answeredQuestions ?? 0;
+              const serverIndex = dbProgress.currentQuestionIndex ?? 0;
+              const hasServerProgress = serverAnswered > 0 || serverIndex > 0;
+              
+              let restoredAnswers = [];
+              let restoredIndex;
+              
+              if (hasServerProgress) {
+                // Si hay progreso en servidor, SIEMPRE priorizar DB y ignorar localStorage
+                clearQuizState();
+                restoredAnswers = [];
+                
+                // CRITICAL FIX: Si el índice del servidor es inconsistente con las respuestas
+                // (serverIndex > serverAnswered + margen de error), entonces el índice del DB
+                // probablemente está incorrecto (de una sesión anónima anterior). 
+                // Usar serverAnswered para calcular el índice correcto.
+                // Margen de 1: permite que serverIndex sea serverAnswered o serverAnswered + 1 (siguiente pregunta)
+                if (serverIndex > serverAnswered + 1) {
+                  // El índice del DB parece incorrecto (probablemente de sesión anónima anterior)
+                  // Calcular el índice basado en las preguntas respondidas (la siguiente pregunta sin responder)
+                  restoredIndex = Math.min(serverAnswered, availableQuestions.length - 1);
+                  
+                } else {
+                  // Usar el índice del servidor directamente (sesión autenticada previa)
+                  restoredIndex = Math.min(Math.max(serverIndex, 0), availableQuestions.length - 1);
+                }
+              } else {
+                // Solo si NO hay progreso en servidor (usuario nuevo), intentar usar localStorage para migrar las 3 anónimas
+                let localStorageAnswers = [];
+                try {
+                  const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+                  if (savedState) {
+                    const quizState = JSON.parse(savedState);
+                    const rawAnswers = quizState.answers || [];
+                    localStorageAnswers = Array.isArray(rawAnswers) 
+                      ? rawAnswers.filter(a => a != null && a.questionId != null)
+                      : [];
+                  }
+                } catch (e) {
+                  console.error("Error reading localStorage for answers:", e);
+                }
+                
+                clearQuizState();
+                restoredAnswers = localStorageAnswers;
+                
+                // Find the correct index based on source_id
+                restoredIndex = dbProgress.currentQuestionIndex || 0;
+                if (restoredAnswers.length > 0 && availableQuestions.length > 0) {
+                  const lastAnsweredIndex = restoredAnswers.length - 1;
+                  const lastAnsweredQuestionId = restoredAnswers[lastAnsweredIndex]?.questionId;
+                  
+                  if (lastAnsweredQuestionId !== undefined) {
+                    const foundIndex = availableQuestions.findIndex(q => q.source_id === lastAnsweredQuestionId);
+                    if (foundIndex !== -1) {
+                      restoredIndex = Math.min(foundIndex + 1, availableQuestions.length - 1);
+                    } else {
+                      const answeredQuestionIds = new Set(restoredAnswers.map(a => a?.questionId).filter(Boolean));
+                      const firstUnansweredIndex = availableQuestions.findIndex(q => !answeredQuestionIds.has(q.source_id));
+                      restoredIndex = firstUnansweredIndex !== -1 ? firstUnansweredIndex : 0;
+                    }
+                  } else {
+                    restoredIndex = Math.min(dbProgress.currentQuestionIndex || 0, availableQuestions.length - 1);
+                  }
+                } else {
+                  restoredIndex = Math.min(dbProgress.currentQuestionIndex || 0, availableQuestions.length - 1);
+                }
+              }
+              
+              // Ensure restoredIndex is valid (>= 0)
+              if (restoredIndex < 0) {
+                restoredIndex = 0;
+              }
               
               setCurrentQuestionIndex(restoredIndex);
               setCorrectAnswers(dbProgress.correctAnswers);
-              setAnsweredQuestions(dbProgress.answeredQuestions);
+              setAnsweredQuestions(dbProgress.answeredQuestions || 0);
               setAnswers(restoredAnswers);
               
               // Restore selectedAnswer and showExplanation if there's an answer for current question
-              const currentAnswer = restoredAnswers[restoredIndex];
-              if (currentAnswer && currentAnswer.selectedOption !== undefined) {
+              const currentQuestion = availableQuestions[restoredIndex];
+              const currentAnswer = currentQuestion ? restoredAnswers.find(a => a?.questionId === currentQuestion.source_id) : null;
+              if (currentAnswer && currentAnswer?.selectedOption !== undefined) {
                 setSelectedAnswer(currentAnswer.selectedOption);
                 setShowExplanation(true);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:310',message:'Restoring answer from localStorage/DB after sync',data:{restoredIndex,selectedOption:currentAnswer.selectedOption,hasAnswer:true,fromLocalStorage:localStorageAnswers.length > 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                // #endregion
               } else {
                 setSelectedAnswer(null);
                 setShowExplanation(false);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:325',message:'No answer to restore from DB/localStorage after sync',data:{restoredIndex,hasAnswer:false,localStorageAnswersCount:localStorageAnswers.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                // #endregion
               }
               
               // Update localStorage with DB progress and restored answers
@@ -356,6 +577,10 @@ export default function Quiz() {
             setIsLoadingFromDatabase(false);
             setHasLoadedFromDatabase(true);
             setIsRestoring(false);
+            isLoadingFromDatabaseRef.current = false; // Clear ref
+            if (availableQuestions.length > 0 && !isLoadingQuestions) {
+              hasRestoredRef.current = true;
+            }
           })
           .catch((err) => {
             console.error("Error syncing user:", err);
@@ -363,49 +588,114 @@ export default function Quiz() {
             // On error, fall back to localStorage
             restoreQuizState();
             setIsRestoring(false);
+            isLoadingFromDatabaseRef.current = false; // Clear ref on error
+            if (availableQuestions.length > 0 && !isLoadingQuestions) {
+              hasRestoredRef.current = true;
+            }
           });
       } else if (hasSynced) {
         // User already synced, load progress from database
+        isLoadingFromDatabaseRef.current = true; // Set ref FIRST
         setIsLoadingFromDatabase(true);
         loadProgressFromDatabase().then((dbProgress) => {
           if (dbProgress) {
-            // Try to get answers from localStorage before clearing
-            let localStorageAnswers = [];
-            try {
-              const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
-              if (savedState) {
-                const quizState = JSON.parse(savedState);
-                localStorageAnswers = quizState.answers || [];
-              }
-            } catch (e) {
-              console.error("Error reading localStorage for answers:", e);
+            // CRITICAL FIX: Wait for questions to load before restoring
+            if (availableQuestions.length === 0 || isLoadingQuestions) {
+              setIsLoadingFromDatabase(false);
+              setHasLoadedFromDatabase(true);
+              setIsRestoring(false);
+              isLoadingFromDatabaseRef.current = false; // Clear ref
+              return; // Wait for questions to load, then restore will happen in next useEffect cycle
             }
             
-            // Limpiar localStorage para evitar conflictos
-            clearQuizState();
-            const restoredIndex = dbProgress.currentQuestionIndex;
-            // Use localStorage answers if available, otherwise use empty array from DB
-            const restoredAnswers = localStorageAnswers.length > 0 ? localStorageAnswers : (dbProgress.answers || []);
+            // Define server progress values
+            const serverAnswered = dbProgress.answeredQuestions ?? 0;
+            const serverIndex = dbProgress.currentQuestionIndex ?? 0;
+            const hasServerProgress = serverAnswered > 0 || serverIndex > 0;
+            
+            let restoredAnswers = [];
+            let restoredIndex;
+            
+            if (hasServerProgress) {
+              // Si hay progreso en servidor, SIEMPRE priorizar DB y ignorar localStorage
+              clearQuizState();
+              restoredAnswers = [];
+              
+              // CRITICAL FIX: Si el índice del servidor es inconsistente con las respuestas
+              // (serverIndex > serverAnswered + margen de error), entonces el índice del DB
+              // probablemente está incorrecto (de una sesión anónima anterior). 
+              // Usar serverAnswered para calcular el índice correcto.
+              // Margen de 1: permite que serverIndex sea serverAnswered o serverAnswered + 1 (siguiente pregunta)
+              if (serverIndex > serverAnswered + 1) {
+                // El índice del DB parece incorrecto (probablemente de sesión anónima anterior)
+                // Calcular el índice basado en las preguntas respondidas (la siguiente pregunta sin responder)
+                restoredIndex = Math.min(serverAnswered, availableQuestions.length - 1);
+                
+              } else {
+                // Usar el índice del servidor directamente (sesión autenticada previa)
+                restoredIndex = Math.min(Math.max(serverIndex, 0), availableQuestions.length - 1);
+              }
+            } else {
+              // Solo si NO hay progreso en servidor (usuario nuevo), intentar usar localStorage para migrar las 3 anónimas
+              let localStorageAnswers = [];
+              try {
+                const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+                if (savedState) {
+                  const quizState = JSON.parse(savedState);
+                  localStorageAnswers = quizState.answers || [];
+                }
+              } catch (e) {
+                console.error("Error reading localStorage for answers:", e);
+              }
+              
+              clearQuizState();
+              restoredAnswers = localStorageAnswers.length > 0 ? localStorageAnswers : [];
+              
+              // Find the correct index based on source_id
+              restoredIndex = dbProgress.currentQuestionIndex || 0;
+              if (restoredAnswers.length > 0 && availableQuestions.length > 0) {
+                const lastAnsweredIndex = restoredAnswers.length - 1;
+                const lastAnsweredQuestionId = restoredAnswers[lastAnsweredIndex]?.questionId;
+                
+                if (lastAnsweredQuestionId !== undefined) {
+                  const foundIndex = availableQuestions.findIndex(q => q.source_id === lastAnsweredQuestionId);
+                  if (foundIndex !== -1) {
+                    restoredIndex = Math.min(foundIndex + 1, availableQuestions.length - 1);
+                  } else {
+                    const answeredQuestionIds = new Set(restoredAnswers.map(a => a.questionId).filter(Boolean));
+                    const firstUnansweredIndex = availableQuestions.findIndex(q => !answeredQuestionIds.has(q.source_id));
+                    restoredIndex = firstUnansweredIndex !== -1 ? firstUnansweredIndex : 0;
+                  }
+                } else {
+                  restoredIndex = Math.min(dbProgress.currentQuestionIndex || 0, availableQuestions.length - 1);
+                }
+              } else {
+                restoredIndex = Math.min(dbProgress.currentQuestionIndex || 0, availableQuestions.length - 1);
+              }
+            }
+            
+            // Ensure restoredIndex is valid (>= 0)
+            if (restoredIndex < 0) {
+              restoredIndex = 0;
+            }
+            
             
             setCurrentQuestionIndex(restoredIndex);
             setCorrectAnswers(dbProgress.correctAnswers);
-            setAnsweredQuestions(dbProgress.answeredQuestions);
+            setAnsweredQuestions(dbProgress.answeredQuestions || 0);
             setAnswers(restoredAnswers);
             
             // Restore selectedAnswer and showExplanation if there's an answer for current question
-            const currentAnswer = restoredAnswers[restoredIndex];
-            if (currentAnswer && currentAnswer.selectedOption !== undefined) {
+            const currentQuestion = availableQuestions[restoredIndex];
+            const currentAnswer = currentQuestion ? restoredAnswers.find(a => a?.questionId === currentQuestion.source_id) : null;
+            if (currentAnswer && currentAnswer?.selectedOption !== undefined) {
+              
               setSelectedAnswer(currentAnswer.selectedOption);
               setShowExplanation(true);
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:360',message:'Restoring answer from localStorage/DB',data:{restoredIndex,selectedOption:currentAnswer.selectedOption,hasAnswer:true,fromLocalStorage:localStorageAnswers.length > 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-              // #endregion
             } else {
+              
               setSelectedAnswer(null);
               setShowExplanation(false);
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:375',message:'No answer to restore from DB/localStorage',data:{restoredIndex,hasAnswer:false,localStorageAnswersCount:localStorageAnswers.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-              // #endregion
             }
             
             saveQuizState();
@@ -415,16 +705,27 @@ export default function Quiz() {
           setIsLoadingFromDatabase(false);
           setHasLoadedFromDatabase(true);
           setIsRestoring(false);
+          isLoadingFromDatabaseRef.current = false; // Clear ref
+          if (availableQuestions.length > 0 && !isLoadingQuestions) {
+            hasRestoredRef.current = true;
+          }
         }).catch(() => {
           setIsLoadingFromDatabase(false);
           setHasLoadedFromDatabase(true);
           restoreQuizState();
           setIsRestoring(false);
+          isLoadingFromDatabaseRef.current = false; // Clear ref on error
+          if (availableQuestions.length > 0 && !isLoadingQuestions) {
+            hasRestoredRef.current = true;
+          }
         });
       } else {
         // Sync in progress, wait a bit and try localStorage
         restoreQuizState();
         setIsRestoring(false);
+        if (availableQuestions.length > 0 && !isLoadingQuestions) {
+          hasRestoredRef.current = true;
+        }
       }
     } else {
       // Not signed in, check if we just logged out
@@ -442,42 +743,68 @@ export default function Quiz() {
         restoreQuizState();
         setIsRestoring(false);
       }
+      if (availableQuestions.length > 0 && !isLoadingQuestions) {
+        hasRestoredRef.current = true;
+      }
+    }
+  }, [isLoaded, isSignedIn, isLoadingQuestions, availableQuestions.length, isRestoring, isLoadingFromDatabase]);
+
+  // Polling para verificar cuando isSignedIn finalmente se actualiza después del redirect
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
+    if (redirectFlag && !isSignedIn) {
+      // Forzar recarga del estado de autenticación después de un delay
+      // Esto ayuda cuando Clerk tarda en actualizar el estado después del redirect
+      const timeoutId = setTimeout(() => {
+        // Recargar la página si aún no está autenticado
+        // Esto fuerza a Clerk a re-evaluar el estado de autenticación
+        // Solo recargar si el flag todavía existe (no fue removido por otro proceso)
+        if (!isSignedIn && localStorage.getItem('epa608_redirect_after_auth')) {
+          window.location.reload();
+        }
+      }, 2000);
+      
+      return () => clearTimeout(timeoutId);
+    } else if (redirectFlag && isSignedIn) {
+      localStorage.removeItem('epa608_redirect_after_auth');
     }
   }, [isLoaded, isSignedIn]);
 
 
-  // Save state whenever it changes (but not during restoration)
+  // Save state to localStorage whenever it changes (but not during restoration)
+  // NOTE: Database save is now handled in handleNext to avoid spam
   useEffect(() => {
     if (!isRestoring && isLoaded && currentQuestionIndex > 0) {
       saveQuizState();
-      // Also save to database if user is signed in
-      saveProgressToDatabase();
+      // NO llamar saveProgressToDatabase aquí - se hace desde handleNext
     }
   }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers, isSignedIn, isLoaded]);
 
   // Effect to adjust currentQuestionIndex when available questions change
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || isLoadingQuestions || isRestoring || isLoadingFromDatabase) return;
     
-    const getAvailableQuestionsCount = () => {
-      if (isPremium) return questions.length;
-      if (!isSignedIn) return 3;
-      return 20;
-    };
+    const availableCount = availableQuestions.length;
     
-    const availableCount = getAvailableQuestionsCount();
-    
-    // If current index is beyond available questions, adjust it
-    if (currentQuestionIndex >= availableCount) {
+    // CRITICAL FIX: If availableCount is 0, don't adjust (questions might be loading or there's an error)
+    // Only adjust if we have questions and the index is out of bounds
+    if (availableCount > 0 && currentQuestionIndex >= availableCount) {
       // If user just logged in and was on question 3, keep them there
       // Otherwise, set to the last available question
       const newIndex = Math.min(currentQuestionIndex, availableCount - 1);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:346',message:'Adjusting question index',data:{oldIndex:currentQuestionIndex,newIndex,availableCount,isPremium,isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       setCurrentQuestionIndex(newIndex);
+    } else if (availableCount > 0 && currentQuestionIndex < 0) {
+      // If index is negative, reset to 0
+      setCurrentQuestionIndex(0);
+    } else if (availableCount === 0 && currentQuestionIndex > 0 && !isLoadingQuestions) {
+      // If questions are empty but we have an index, reset to 0
+      // This prevents showing premium modal incorrectly
+      // Only do this if questions are not loading
+      setCurrentQuestionIndex(0);
     }
-  }, [isLoaded, isSignedIn, isPremium, currentQuestionIndex]);
+  }, [isLoaded, isSignedIn, isPremium, currentQuestionIndex, availableQuestions.length, isLoadingQuestions, isRestoring, isLoadingFromDatabase]);
 
   // Effect to show auth modal when reaching question 4 (index 3) and user is not signed in
   useEffect(() => {
@@ -497,42 +824,41 @@ export default function Quiz() {
 
   // Effect to show modal when directly accessing premium question
   useEffect(() => {
+    // No mostrar modal mientras se están cargando las preguntas
+    if (isLoadingQuestions || availableQuestions.length === 0) {
+      return;
+    }
+    
+    // CRITICAL FIX for Bug 2: Don't show modal if we're still restoring state
+    // This prevents showing the modal incorrectly when user returns to quiz
+    if (isRestoring || isLoadingFromDatabase) {
+      return;
+    }
+    
     const question = availableQuestions[currentQuestionIndex];
-    if (question && question.id === 21 && !isPremium) {
-      setShowPremiumModal(true);
-    }
+    
     // Also check if current question index is beyond available questions
-    if (currentQuestionIndex >= availableQuestions.length && !isPremium) {
+    // Fix Bug 2: Only show modal if there are questions available and we're beyond them
+    // Don't show if availableQuestions.length is 0 (questions still loading or error)
+    // CRITICAL: Also don't show if we're restoring state (prevents false positives when returning to quiz)
+    if (availableQuestions.length > 0 && currentQuestionIndex >= availableQuestions.length && !isPremium && !isRestoring && !isLoadingFromDatabase) {
       setShowPremiumModal(true);
     }
-  }, [currentQuestionIndex, isPremium, isSignedIn]);
+  }, [currentQuestionIndex, isPremium, isSignedIn, isLoadingQuestions, availableQuestions.length, isRestoring, isLoadingFromDatabase]);
 
   const handleAnswerClick = (optionIndex) => {
     if (isAnswered) return; // Don't allow changing answer after selecting
+    if (!currentQuestion) return; // CRITICAL FIX: Don't process if question is not available
 
     setSelectedAnswer(optionIndex);
     setShowExplanation(true);
 
-    // Check if answer is correct and update counter
-    const isCorrectAnswer = optionIndex === currentQuestion.correctAnswer;
-    if (isCorrectAnswer) {
-      setCorrectAnswers((prev) => prev + 1);
-    }
-
-    // Increment answered questions counter
-    setAnsweredQuestions((prev) => {
-      const newCount = prev + 1;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:382',message:'Answer submitted',data:{previousCount:prev,newCount,currentQuestionIndex,isCorrect:isCorrectAnswer},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      return newCount;
-    });
-
-    // Save answer to answers array for persistence
+    // Save answer to answers array for persistence (but don't increment counters yet)
+    const isCorrectAnswer = optionIndex === currentQuestion.correct_answer;
     setAnswers((prev) => {
       const newAnswers = [...prev];
       newAnswers[currentQuestionIndex] = {
-        questionId: currentQuestion.id,
+        questionId: currentQuestion.source_id,
         selectedOption: optionIndex,
         isCorrect: isCorrectAnswer,
       };
@@ -541,29 +867,60 @@ export default function Quiz() {
   };
 
   const handleNext = () => {
+    // Validar que selectedAnswer no sea null
+    if (selectedAnswer === null || !currentQuestion) {
+      return;
+    }
+
+    // Calcular isCorrect
+    const isCorrect = selectedAnswer === currentQuestion.correct_answer;
+
+    // Calcular los valores "post-respuesta" para persistir.
+    // IMPORTANTE: estos valores se usan para el POST a la DB (cross-device),
+    // porque el state de React todavía NO refleja los incrementos en este tick.
     const nextIndex = currentQuestionIndex + 1;
+    const nextAnswered = answeredQuestions + 1;
+    const nextCorrect = correctAnswers + (isCorrect ? 1 : 0);
+
+    // AHÍ incrementar contadores
+    setAnsweredQuestions((prev) => prev + 1);
+    if (isCorrect) {
+      setCorrectAnswers((prev) => prev + 1);
+    }
+
+    const persistProgress = async () => {
+      if (!isSignedIn) return;
+      if (isSavingRef.current) return;
+      isSavingRef.current = true;
+      try {
+        await saveProgressToDatabase({
+          currentQuestionIndex: nextIndex,
+          correctAnswers: nextCorrect,
+          totalAnswered: nextAnswered,
+        });
+      } finally {
+        isSavingRef.current = false;
+      }
+    };
 
     // Check if next question is #4 (index 3) and user is not signed in
     // Pause the quiz and show auth modal
     if (nextIndex === 3 && !isSignedIn && isLoaded) {
       setShowAuthModal(true);
       // Don't advance - pause the quiz
+      // But still save progress for current question
+      saveQuizState();
+      persistProgress();
       return;
     }
 
     // Check if next question is beyond available questions for non-premium users
-    if (nextIndex >= availableQuestions.length && !isPremium) {
+    // CRITICAL FIX: Don't show premium modal if we're still restoring state
+    if (nextIndex >= availableQuestions.length && !isPremium && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
       setShowPremiumModal(true);
-      return;
-    }
-
-    // Check if next question is #21 (id: 21) and user is not premium
-    if (
-      nextIndex < availableQuestions.length &&
-      availableQuestions[nextIndex]?.id === 21 &&
-      !isPremium
-    ) {
-      setShowPremiumModal(true);
+      // Save progress before showing modal
+      saveQuizState();
+      persistProgress();
       return;
     }
 
@@ -573,12 +930,24 @@ export default function Quiz() {
       // If trying to go to question 4+ and not signed in, don't advance
       if (nextIndex >= 3 && !isSignedIn) {
         setShowAuthModal(true);
+        // Save progress before showing modal
+        saveQuizState();
+        persistProgress();
         return;
       }
 
+      // Avanzar índice
       setCurrentQuestionIndex(nextIndex);
       setSelectedAnswer(null);
       setShowExplanation(false);
+
+      // AHÍ guardar en DB una sola vez (con guard para evitar doble envío)
+      saveQuizState();
+      persistProgress();
+    } else {
+      // End of quiz - save progress
+      saveQuizState();
+      persistProgress();
     }
   };
 
@@ -601,11 +970,39 @@ export default function Quiz() {
     }
   };
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:449',message:'Current question check',data:{hasCurrentQuestion:!!currentQuestion,currentQuestionIndex,availableQuestionsLength:availableQuestions.length,answeredQuestions},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
-  
-  if (!currentQuestion) {
+  // Mostrar estado de carga mientras se cargan las preguntas
+  if (isLoadingQuestions) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading questions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Mostrar error si hay problema cargando preguntas
+  if (questionsError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Error loading questions</h2>
+          <p className="text-gray-700 mb-4">{questionsError}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg"
+          >
+            Reload
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // CRITICAL FIX for Bug 2: Don't show "completed" message if we're still loading or restoring
+  // This prevents showing the message incorrectly when user returns to quiz
+  if (!currentQuestion && !isLoadingQuestions && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8 relative overflow-hidden">
         {/* Decorative background elements */}
@@ -637,7 +1034,33 @@ export default function Quiz() {
     );
   }
 
-  const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
+  // CRITICAL FIX: Ensure currentQuestion exists before accessing properties
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">
+            Error: No question available at index {currentQuestionIndex}. Available: {availableQuestions.length}
+          </p>
+          <button
+            onClick={() => {
+              setCurrentQuestionIndex(0);
+              setSelectedAnswer(null);
+              setShowExplanation(false);
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Reset to first question
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // CRITICAL FIX: Ensure currentQuestion exists before accessing properties
+  const isCorrect = currentQuestion && selectedAnswer !== null
+    ? selectedAnswer === currentQuestion.correct_answer
+    : false;
 
   return (
     <div className="min-h-screen bg-gray-50 text-slate-900 relative overflow-hidden">
@@ -757,6 +1180,28 @@ export default function Quiz() {
           </div>
 
           {/* Question with marker on the right */}
+          {/* CRITICAL FIX: Only render question section if currentQuestion exists */}
+          {!currentQuestion && (isLoadingQuestions || isRestoring || isLoadingFromDatabase) ? (
+            <div className="col-span-full text-center py-12">
+              <p className="text-gray-600">Loading question...</p>
+            </div>
+          ) : !currentQuestion ? (
+            <div className="col-span-full text-center py-12">
+              <p className="text-red-600 mb-4">
+                Error: No question available at index {currentQuestionIndex}. Available: {availableQuestions.length}
+              </p>
+              <button
+                onClick={() => {
+                  setCurrentQuestionIndex(0);
+                  setSelectedAnswer(null);
+                  setShowExplanation(false);
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Reset to first question
+              </button>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             {/* Question Section - Takes 2 columns on desktop */}
             <div className="lg:col-span-2 order-1 bg-white border border-gray-200 rounded-xl p-6 md:p-8 shadow-sm">
@@ -776,23 +1221,22 @@ export default function Quiz() {
                 </div>
               )}
               <h2 className="text-xl md:text-2xl font-semibold text-slate-900 mb-6">
-                {currentQuestion.text}
+                {currentQuestion?.text || 'Loading question...'}
               </h2>
 
               {/* Options */}
               <div className="space-y-3">
-                {currentQuestion.options.map((option, index) => {
+                {currentQuestion?.options?.map((option, index) => {
                   let buttonClass =
                     "w-full text-left p-4 rounded-lg border-2 transition-all duration-300 ";
 
-                  if (isAnswered) {
-                    if (index === currentQuestion.correctAnswer) {
-                      buttonClass += "bg-green-500 border-green-600 text-white";
-                    } else if (index === selectedAnswer && !isCorrect) {
-                      buttonClass += "bg-red-500 border-red-600 text-white";
+                  if (isAnswered && currentQuestion) {
+                    if (index === selectedAnswer) {
+                      buttonClass += isCorrect
+                        ? "bg-green-500 border-green-600 text-white"
+                        : "bg-red-500 border-red-600 text-white";
                     } else {
-                      buttonClass +=
-                        "bg-gray-100 border-gray-200 text-gray-500";
+                      buttonClass += "bg-gray-100 border-gray-200 text-gray-500";
                     }
                   } else {
                     buttonClass +=
@@ -842,7 +1286,7 @@ export default function Quiz() {
                           isCorrect ? "text-green-800" : "text-red-800"
                         }`}
                       >
-                        {currentQuestion.explanation}
+                        {currentQuestion?.explanation || ''}
                       </p>
                     </div>
                   </div>
@@ -881,19 +1325,14 @@ export default function Quiz() {
                     <span className="text-gray-600">Remaining:</span>
                     <span className="text-blue-600 font-semibold">
                       {displayQuestionCount - answeredQuestions}
-                      {!isPremium && ` free`}
+                      {!isPremium && ' free'}
                     </span>
                   </div>
-                  {/* #region agent log */}
-                  {(() => {
-                    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:786',message:'Progress display',data:{isSignedIn,isPremium,answeredQuestions,displayQuestionCount,availableQuestionsCount:availableQuestions.length,remaining:displayQuestionCount - answeredQuestions},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-                    return null;
-                  })()}
-                  {/* #endregion */}
                 </div>
               </div>
             </div>
           </div>
+          )}
         </div>
 
         {/* Premium Modal with PricingSection */}

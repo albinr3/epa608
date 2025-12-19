@@ -5,7 +5,6 @@ import { CheckCircle2, Shield, Lock, Zap } from 'lucide-react';
 import { useUser, SignInButton, UserButton } from '@clerk/nextjs';
 import Image from 'next/image';
 import Link from 'next/link';
-import { questions } from '../es/data';
 import AuthModal from './AuthModal';
 import LanguageSelector from './LanguageSelector';
 
@@ -28,9 +27,116 @@ export default function QuizEs() {
   const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
   const prevIsSignedInRef = useRef(null);
   const justLoggedOutRef = useRef(false);
+  const isSavingRef = useRef(false); // Prevenir doble guardado en handleNext
+  const hasRestoredRef = useRef(false); // Prevenir restauración repetida mientras el usuario responde
+  const prevSignedInForRestoreRef = useRef(null); // Resetear restore guard al cambiar auth state
+  
+  // Estado para preguntas cargadas desde la API
+  const [questions, setQuestions] = useState([]);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
+  const [questionsError, setQuestionsError] = useState(null);
+  const [limitApplied, setLimitApplied] = useState(3);
+  
+  // Refs para prevenir múltiples fetches
+  const hasLoadedQuestionsRef = useRef(false);
+  const isLoadingQuestionsRef = useRef(false);
+  const loadQuestionsKeyRef = useRef(null);
+  const prevIsSignedInForQuestionsRef = useRef(isSignedIn);
 
-  const currentQuestion = questions[currentQuestionIndex];
+  // Cargar preguntas desde la API (solo una vez por combinación de parámetros)
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    // Si isSignedIn cambió de false a true, resetear ref para forzar recarga
+    if (prevIsSignedInForQuestionsRef.current === false && isSignedIn === true) {
+      hasLoadedQuestionsRef.current = false;
+    }
+    prevIsSignedInForQuestionsRef.current = isSignedIn;
+    
+    // Crear una key única para esta combinación de parámetros
+    const loadKey = `${isSignedIn ? 'auth' : 'anon'}-es`;
+    
+    // Si ya se cargaron preguntas para esta key, no volver a cargar
+    if (hasLoadedQuestionsRef.current === loadKey) {
+      setIsLoadingQuestions(false);
+      return;
+    }
+    
+    // Si ya hay una carga en progreso para la misma key, no iniciar otra
+    if (isLoadingQuestionsRef.current && loadQuestionsKeyRef.current === loadKey) {
+      return;
+    }
+
+    // Marcar inmediatamente que estamos cargando (antes del async)
+    isLoadingQuestionsRef.current = true;
+    loadQuestionsKeyRef.current = loadKey;
+
+    const loadQuestions = async () => {
+      setIsLoadingQuestions(true);
+      setQuestionsError(null);
+      
+      try {
+        const response = await fetch('/api/questions?lang=es&category=ALL', { 
+          cache: 'no-store' 
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to load questions');
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          setQuestions(data.questions || []);
+          setIsPremium(data.isPremium || false);
+          setLimitApplied(data.limitApplied || 3);
+          // Marcar que ya se cargaron para esta key
+          hasLoadedQuestionsRef.current = loadKey;
+        } else {
+          throw new Error(data.error || 'Failed to load questions');
+        }
+      } catch (error) {
+        console.error('Error loading questions:', error);
+        setQuestionsError(error.message);
+        // Si hay error, permitir reintento (resetear la key)
+        hasLoadedQuestionsRef.current = null;
+      } finally {
+        setIsLoadingQuestions(false);
+        isLoadingQuestionsRef.current = false;
+        // Solo limpiar la key si no es la misma que estamos cargando
+        if (loadQuestionsKeyRef.current === loadKey) {
+          loadQuestionsKeyRef.current = null;
+        }
+      }
+    };
+
+    loadQuestions();
+    
+    // Cleanup: si el componente se desmonta o cambian las dependencias antes de completar
+    return () => {
+      // No limpiar hasLoadedQuestionsRef aquí porque queremos mantener el cache
+      // Solo limpiar si cambió la key
+      if (loadQuestionsKeyRef.current === loadKey) {
+        isLoadingQuestionsRef.current = false;
+        loadQuestionsKeyRef.current = null;
+      }
+    };
+  }, [isLoaded, isSignedIn, isLoadingQuestions, questions.length, isLoadingFromDatabase, hasLoadedFromDatabase, isRestoring]);
+
+  const availableQuestions = questions;
+  // Para el UI: usuarios anónimos ven 20 preguntas, aunque solo tengan acceso a 3
+  // Para usuarios logueados no premium: 20, para premium: todas
+  const displayQuestionCount = isPremium 
+    ? (limitApplied === Infinity ? questions.length : limitApplied)
+    : (!isSignedIn ? 20 : (limitApplied === Infinity ? questions.length : limitApplied));
+  const currentQuestion = availableQuestions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
+
+  // IMPORTANTE (regresión evitada: conteo incorrecto al cambiar idioma EN <-> ES):
+  // - En un bug previo, el UI en ES mostraba "Completadas" como `currentQuestionIndex + 1`.
+  // - Pero `currentQuestionIndex` (posición actual) NO siempre coincide con `answeredQuestions` (total respondidas),
+  //   especialmente cuando se restaura desde DB o al cambiar de idioma (pueden existir saltos/ajustes de índice).
+  // - Fuente de verdad para "Completadas" debe ser `answeredQuestions` (DB: `total_answered`).
   
   // Calcular preguntas gratuitas respondidas (primeras 3)
   const freeQuestionsAnswered = Math.min(answeredQuestions, 3);
@@ -38,14 +144,17 @@ export default function QuizEs() {
   // Para usuarios premium, mostrar progreso total; para no premium, solo las primeras 3
   const totalQuestionsAnswered = isPremium ? answeredQuestions : freeQuestionsAnswered;
 
+
   // Guardar estado del quiz en localStorage (guardar en clave compartida para que el progreso persista entre idiomas)
   const saveQuizState = () => {
     try {
+      // Filter out nulls and invalid entries before saving
+      const compact = Array.isArray(answers) ? answers.filter(a => a != null && a.questionId != null) : [];
       const quizState = {
         currentQuestionIndex,
         correctAnswers,
         answeredQuestions,
-        answers,
+        answers: compact,
         timestamp: Date.now(),
       };
       // Guardar en clave compartida para que el progreso persista entre idiomas
@@ -58,22 +167,32 @@ export default function QuizEs() {
   };
 
   // Guardar progreso del quiz en Supabase
-  const saveProgressToDatabase = async () => {
+  //
+  // IMPORTANTE (regresión evitada: progreso "1 por detrás" entre computadoras):
+  // - En un bug previo, el usuario contestaba 11 preguntas en una PC, pero al loguearse en otra PC veía 10.
+  // - Causa: `setAnsweredQuestions`/`setCorrectAnswers` en React son async; si el POST usa el state actual,
+  //   se envía el valor anterior (stale) al backend.
+  // - Solución: soportar `saveProgressToDatabase(override)` y desde `handleNext` enviar valores post-respuesta.
+  //
+  // Si modificas `handleNext` en el futuro, asegúrate de mantener este patrón.
+  const saveProgressToDatabase = async (override) => {
     if (!isSignedIn || !isLoaded || isLoadingFromDatabase || !hasLoadedFromDatabase) {
       return;
     }
 
     try {
+      // Usar override si se provee (valores post-respuesta) para evitar state lag.
+      const payload = {
+        currentQuestionIndex: typeof override?.currentQuestionIndex === 'number' ? override.currentQuestionIndex : currentQuestionIndex,
+        correctAnswers: typeof override?.correctAnswers === 'number' ? override.correctAnswers : correctAnswers,
+        totalAnswered: typeof override?.totalAnswered === 'number' ? override.totalAnswered : answeredQuestions,
+      };
       const response = await fetch('/api/quiz/progress', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          currentQuestionIndex,
-          correctAnswers,
-          totalAnswered: answeredQuestions,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -154,7 +273,12 @@ export default function QuizEs() {
           setCurrentQuestionIndex(quizState.currentQuestionIndex || 0);
           setCorrectAnswers(quizState.correctAnswers || 0);
           setAnsweredQuestions(quizState.answeredQuestions || 0);
-          setAnswers(quizState.answers || []);
+          // Filter out nulls and invalid entries to ensure safe access
+          const rawAnswers = quizState.answers || [];
+          const safeAnswers = Array.isArray(rawAnswers) 
+            ? rawAnswers.filter(a => a != null && a.questionId != null)
+            : [];
+          setAnswers(safeAnswers);
           return true;
         } else {
           // Limpiar estado antiguo de ambas claves
@@ -202,6 +326,7 @@ export default function QuizEs() {
       setShowExplanation(false);
       setHasLoadedFromDatabase(false);
       setIsRestoring(false);
+      hasRestoredRef.current = false;
       
       // Limpiar el flag después de un delay para permitir que restoreQuizState lo verifique
       // Usar setTimeout para asegurar que todas las llamadas pendientes a restoreQuizState tengan oportunidad de verificar el flag
@@ -218,6 +343,40 @@ export default function QuizEs() {
   // Restaurar estado al montar y cuando el usuario inicia sesión
   useEffect(() => {
     if (!isLoaded) return;
+
+
+    // CRITICAL (bug cambio de idioma):
+    // Si este effect corre cuando todavía NO hay preguntas cargadas (availableQuestions.length===0),
+    // algunos clamps como `Math.min(..., availableQuestions.length - 1)` pueden producir -1.
+    // Luego, cuando las preguntas cargan, el componente puede renderizar el estado de "¡Felicidades!"
+    // porque `currentQuestion` queda undefined en index -1. Por eso, esperamos a que haya preguntas.
+    if (isSignedIn && (isLoadingQuestions || availableQuestions.length === 0)) {
+      return;
+    }
+
+    // IMPORTANTE (regresión evitada):
+    // - Cuando el usuario pasa de ANÓNIMO -> LOGUEADO, debemos continuar donde iba (pregunta 4 tras 3 anónimas).
+    // - En un bug previo, el guard `hasRestoredRef` bloqueaba la restauración mientras aún no había preguntas
+    //   (`availableQuestions.length===0` / `isLoadingQuestions===true`). Eso hacía que, tras el login, el quiz
+    //   no migrara el progreso y reiniciara en la pregunta 1.
+    // Por eso:
+    // - Reseteamos el guard cuando cambia `isSignedIn`.
+    // - Y solo permitimos el "short-circuit" cuando ya hay preguntas cargadas.
+    //
+    // Si el usuario se loguea después de 3 anónimas, debe continuar en la pregunta 4.
+    //
+    // Si cambia el estado de auth (anon -> signed in o viceversa), permitir una restauración
+    if (prevSignedInForRestoreRef.current !== isSignedIn) {
+      hasRestoredRef.current = false;
+      prevSignedInForRestoreRef.current = isSignedIn;
+    }
+
+    // Prevenir restauración repetida (por ejemplo, mientras el usuario responde)
+    // IMPORTANTE: no bloquear mientras las preguntas aún no cargaron, o se puede perder la migración post-login
+    if (hasRestoredRef.current && availableQuestions.length > 0 && !isLoadingQuestions && !isLoadingFromDatabase) {
+      setIsRestoring(false);
+      return;
+    }
 
     // Verificar si acabamos de desloguear - si es así, no restaurar nada
     const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
@@ -262,12 +421,41 @@ export default function QuizEs() {
             setIsLoadingFromDatabase(true);
             const dbProgress = await loadProgressFromDatabase();
             if (dbProgress) {
-              // Limpiar localStorage para evitar conflictos
-              clearQuizState();
-              setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+              // Define server progress values
+              const serverAnswered = dbProgress.answeredQuestions ?? 0;
+              const serverIndex = dbProgress.currentQuestionIndex ?? 0;
+              const hasServerProgress = serverAnswered > 0 || serverIndex > 0;
+              
+              let restoredAnswers = [];
+              let restoredIndex;
+              
+              if (hasServerProgress) {
+                // Si hay progreso en servidor, SIEMPRE priorizar DB y ignorar localStorage
+                clearQuizState();
+                restoredAnswers = [];
+                restoredIndex = Math.min(Math.max(serverIndex, 0), questions.length - 1);
+              } else {
+                // Solo si NO hay progreso en servidor (usuario nuevo), intentar usar localStorage para migrar las 3 anónimas
+                let localStorageAnswers = [];
+                try {
+                  const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+                  if (savedState) {
+                    const quizState = JSON.parse(savedState);
+                    localStorageAnswers = quizState.answers || [];
+                  }
+                } catch (e) {
+                  console.error("Error reading localStorage for answers:", e);
+                }
+                
+                clearQuizState();
+                restoredAnswers = localStorageAnswers.length > 0 ? localStorageAnswers : [];
+                restoredIndex = Math.min(Math.max(dbProgress.currentQuestionIndex || 0, 0), questions.length - 1);
+              }
+              
+              setCurrentQuestionIndex(restoredIndex);
               setCorrectAnswers(dbProgress.correctAnswers);
-              setAnsweredQuestions(dbProgress.answeredQuestions);
-              setAnswers(dbProgress.answers);
+              setAnsweredQuestions(dbProgress.answeredQuestions || 0);
+              setAnswers(restoredAnswers);
               // Actualizar localStorage con el progreso de DB
               saveQuizState();
             } else {
@@ -277,6 +465,7 @@ export default function QuizEs() {
             setIsLoadingFromDatabase(false);
             setHasLoadedFromDatabase(true);
             setIsRestoring(false);
+            hasRestoredRef.current = true;
           })
           .catch((error) => {
             console.error('Error syncing user:', error);
@@ -284,18 +473,51 @@ export default function QuizEs() {
             // En caso de error, usar localStorage como respaldo
             restoreQuizState();
             setIsRestoring(false);
+            hasRestoredRef.current = true;
           });
       } else if (hasSynced) {
         // Usuario ya sincronizado, cargar progreso desde la base de datos
         setIsLoadingFromDatabase(true);
         loadProgressFromDatabase().then((dbProgress) => {
           if (dbProgress) {
-            // Limpiar localStorage para evitar conflictos
-            clearQuizState();
-            setCurrentQuestionIndex(dbProgress.currentQuestionIndex);
+            // Define server progress values
+            const serverAnswered = dbProgress.answeredQuestions ?? 0;
+            const serverIndex = dbProgress.currentQuestionIndex ?? 0;
+            const hasServerProgress = serverAnswered > 0 || serverIndex > 0;
+            
+            let restoredAnswers = [];
+            let restoredIndex;
+            
+            if (hasServerProgress) {
+              // Si hay progreso en servidor, SIEMPRE priorizar DB y ignorar localStorage
+              clearQuizState();
+              restoredAnswers = [];
+              restoredIndex = Math.min(Math.max(serverIndex, 0), availableQuestions.length - 1);
+            } else {
+              // Solo si NO hay progreso en servidor (usuario nuevo), intentar usar localStorage para migrar las 3 anónimas
+              let localStorageAnswers = [];
+              try {
+                const savedState = localStorage.getItem(QUIZ_STORAGE_KEY) || localStorage.getItem(QUIZ_STORAGE_KEY_ES);
+                if (savedState) {
+                  const quizState = JSON.parse(savedState);
+                  const rawAnswers = quizState.answers || [];
+                  localStorageAnswers = Array.isArray(rawAnswers) 
+                    ? rawAnswers.filter(a => a != null && a.questionId != null)
+                    : [];
+                }
+              } catch (e) {
+                console.error("Error reading localStorage for answers:", e);
+              }
+              
+              clearQuizState();
+              restoredAnswers = localStorageAnswers;
+              restoredIndex = Math.min(Math.max(dbProgress.currentQuestionIndex || 0, 0), availableQuestions.length - 1);
+            }
+            
+            setCurrentQuestionIndex(restoredIndex);
             setCorrectAnswers(dbProgress.correctAnswers);
-            setAnsweredQuestions(dbProgress.answeredQuestions);
-            setAnswers(dbProgress.answers);
+            setAnsweredQuestions(dbProgress.answeredQuestions || 0);
+            setAnswers(restoredAnswers);
             saveQuizState();
           } else {
             restoreQuizState();
@@ -303,16 +525,19 @@ export default function QuizEs() {
           setIsLoadingFromDatabase(false);
           setHasLoadedFromDatabase(true);
           setIsRestoring(false);
+          hasRestoredRef.current = true;
         }).catch(() => {
           setIsLoadingFromDatabase(false);
           setHasLoadedFromDatabase(true);
           restoreQuizState();
           setIsRestoring(false);
+          hasRestoredRef.current = true;
         });
       } else {
         // Sincronización en progreso, esperar un poco e intentar localStorage
         restoreQuizState();
         setIsRestoring(false);
+        hasRestoredRef.current = true;
       }
     } else {
       // No autenticado, verificar si acabamos de desloguear
@@ -329,8 +554,20 @@ export default function QuizEs() {
         restoreQuizState();
         setIsRestoring(false);
       }
+      hasRestoredRef.current = true;
     }
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, isLoadingQuestions, availableQuestions.length, isLoadingFromDatabase]);
+
+  // CRITICAL (safety net): nunca permitir índices negativos cuando ya hay preguntas cargadas.
+  // Esto evita que se renderice el mensaje de "¡Felicidades!" por un index inválido al cambiar de idioma.
+  useEffect(() => {
+    if (!isLoaded || isLoadingQuestions) return;
+    if (availableQuestions.length > 0 && currentQuestionIndex < 0) {
+      setCurrentQuestionIndex(0);
+    } else if (availableQuestions.length > 0 && currentQuestionIndex >= availableQuestions.length) {
+      setCurrentQuestionIndex(availableQuestions.length - 1);
+    }
+  }, [isLoaded, isLoadingQuestions, availableQuestions.length, currentQuestionIndex]);
   
   // Polling para verificar cuando isSignedIn finalmente se actualiza después del redirect
   useEffect(() => {
@@ -356,12 +593,12 @@ export default function QuizEs() {
   }, [isLoaded, isSignedIn]);
 
 
-  // Guardar estado cuando cambie (pero no durante la restauración)
+  // Guardar estado en localStorage cuando cambie (pero no durante la restauración)
+  // NOTE: El guardado en base de datos ahora se maneja en handleNext para evitar spam
   useEffect(() => {
     if (!isRestoring && isLoaded && currentQuestionIndex > 0) {
       saveQuizState();
-      // También guardar en la base de datos si el usuario está autenticado
-      saveProgressToDatabase();
+      // NO llamar saveProgressToDatabase aquí - se hace desde handleNext
     }
   }, [currentQuestionIndex, correctAnswers, answeredQuestions, answers, isSignedIn, isLoaded]);
 
@@ -391,24 +628,17 @@ export default function QuizEs() {
 
   const handleAnswerClick = (optionIndex) => {
     if (isAnswered) return; // No permitir cambiar la respuesta después de seleccionar
+    if (!currentQuestion) return;
 
     setSelectedAnswer(optionIndex);
     setShowExplanation(true);
-    
-    // Verificar si la respuesta es correcta y actualizar contador
-    const isCorrectAnswer = optionIndex === currentQuestion.correctAnswer;
-    if (isCorrectAnswer) {
-      setCorrectAnswers(prev => prev + 1);
-    }
-    
-    // Incrementar contador de preguntas respondidas
-    setAnsweredQuestions(prev => prev + 1);
-    
-    // Guardar respuesta en array de respuestas para persistencia
+
+    // Guardar respuesta en array de respuestas para persistencia (pero no incrementar contadores aún)
+    const isCorrectAnswer = optionIndex === currentQuestion.correct_answer;
     setAnswers(prev => {
       const newAnswers = [...prev];
       newAnswers[currentQuestionIndex] = {
-        questionId: currentQuestion.id,
+        questionId: currentQuestion.source_id,
         selectedOption: optionIndex,
         isCorrect: isCorrectAnswer,
       };
@@ -417,19 +647,56 @@ export default function QuizEs() {
   };
 
   const handleNext = () => {
-    const nextIndex = currentQuestionIndex + 1;
-    
-    // Verificar si la siguiente pregunta es la 21 (id: 21) y el usuario no es premium
-    if (nextIndex < questions.length && questions[nextIndex].id === 21 && !isPremium) {
-      setShowPremiumModal(true);
+    // Validar que selectedAnswer no sea null
+    if (selectedAnswer === null || !currentQuestion) {
       return;
     }
 
+    // Calcular isCorrect
+    const isCorrect = selectedAnswer === currentQuestion.correct_answer;
+
+    // IMPORTANTE (cross-device): calcular valores post-respuesta para el POST.
+    // No usar `answeredQuestions`/`correctAnswers` directamente después de setState porque pueden ir 1 por detrás.
+    const nextIndex = currentQuestionIndex + 1;
+    const nextAnswered = answeredQuestions + 1;
+    const nextCorrect = correctAnswers + (isCorrect ? 1 : 0);
+
+    const persistProgress = async () => {
+      if (!isSignedIn) return;
+      if (isSavingRef.current) return;
+      isSavingRef.current = true;
+      try {
+        await saveProgressToDatabase({
+          currentQuestionIndex: nextIndex,
+          correctAnswers: nextCorrect,
+          totalAnswered: nextAnswered,
+        });
+      } finally {
+        isSavingRef.current = false;
+      }
+    };
+
+    // AHÍ incrementar contadores
+    setAnsweredQuestions((prev) => prev + 1);
+    if (isCorrect) {
+      setCorrectAnswers((prev) => prev + 1);
+    }
+
+    
     // Avanzar a la siguiente pregunta
     if (nextIndex < questions.length) {
+      // Avanzar índice
       setCurrentQuestionIndex(nextIndex);
       setSelectedAnswer(null);
       setShowExplanation(false);
+
+      // AHÍ guardar en DB una sola vez (con guard para evitar doble envío)
+      saveQuizState();
+      persistProgress();
+    } else {
+      // End of quiz - save progress
+      saveQuizState();
+      persistProgress();
     }
   };
 
@@ -450,6 +717,48 @@ export default function QuizEs() {
       setShowExplanation(false);
     }
   };
+
+  // Mostrar estado de carga mientras se cargan las preguntas
+  if (isLoadingQuestions) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Cargando preguntas...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Mostrar error si hay problema cargando preguntas
+  if (questionsError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Error cargando preguntas</h2>
+          <p className="text-gray-700 mb-4">{questionsError}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg"
+          >
+            Recargar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Mostrar estado de carga mientras se restaura (solo brevemente)
+  if (isRestoring && isLoaded) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Cargando tu progreso...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentQuestion) {
     return (
@@ -481,19 +790,9 @@ export default function QuizEs() {
     );
   }
 
-  // Mostrar estado de carga mientras se restaura (solo brevemente)
-  if (isRestoring && isLoaded) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando tu progreso...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
+  const isCorrect = currentQuestion && selectedAnswer !== null
+    ? selectedAnswer === currentQuestion.correct_answer
+    : false;
 
   return (
     <div className="min-h-screen bg-gray-50 text-slate-900 relative overflow-hidden">
@@ -573,7 +872,7 @@ export default function QuizEs() {
           <div className="mb-4 sm:mb-6 md:mb-8">
           <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
             <span className="text-gray-600 text-sm sm:text-base font-medium">
-              Pregunta {currentQuestionIndex + 1} de {questions.length}
+              Pregunta {currentQuestionIndex + 1} de {displayQuestionCount}
             </span>
             {!isPremium && (
               <span className="text-blue-600 text-sm sm:text-base font-semibold">
@@ -584,7 +883,7 @@ export default function QuizEs() {
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }}
+              style={{ width: `${((currentQuestionIndex + 1) / displayQuestionCount) * 100}%` }}
             />
           </div>
         </div>
@@ -602,11 +901,11 @@ export default function QuizEs() {
             {currentQuestion.options.map((option, index) => {
               let buttonClass = "w-full text-left p-3 sm:p-4 rounded-lg border-2 transition-all duration-300 touch-manipulation min-h-[44px] flex items-center ";
               
-              if (isAnswered) {
-                if (index === currentQuestion.correctAnswer) {
-                  buttonClass += "bg-green-500 border-green-600 text-white";
-                } else if (index === selectedAnswer && !isCorrect) {
-                  buttonClass += "bg-red-500 border-red-600 text-white";
+              if (isAnswered && currentQuestion) {
+                if (index === selectedAnswer) {
+                  buttonClass += isCorrect
+                    ? "bg-green-500 border-green-600 text-white"
+                    : "bg-red-500 border-red-600 text-white";
                 } else {
                   buttonClass += "bg-gray-100 border-gray-200 text-gray-500";
                 }
@@ -666,7 +965,7 @@ export default function QuizEs() {
                 onClick={handleNext}
                 className="px-6 sm:px-8 py-3 sm:py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 touch-manipulation min-w-[120px]"
               >
-                {currentQuestionIndex + 1 < questions.length ? 'Siguiente' : 'Finalizar'}
+                {currentQuestionIndex + 1 < displayQuestionCount ? 'Siguiente' : 'Finalizar'}
               </button>
             </div>
           )}
@@ -678,16 +977,18 @@ export default function QuizEs() {
               <div className="space-y-2 sm:space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600 text-sm sm:text-base">Completadas:</span>
-                  <span className="text-green-600 font-semibold text-sm sm:text-base">{currentQuestionIndex + 1}</span>
+                  {/* IMPORTANTE: usar answeredQuestions (progreso real) en vez de currentQuestionIndex+1.
+                      `currentQuestionIndex` puede diferir de `total_answered` (DB) y causar discrepancias al cambiar de idioma. */}
+                  <span className="text-green-600 font-semibold text-sm sm:text-base">{answeredQuestions}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600 text-sm sm:text-base">Restantes:</span>
                   <span className="text-blue-600 font-semibold text-sm sm:text-base">
-                    {questions.length - (currentQuestionIndex + 1)}
-                    {!isPremium && currentQuestionIndex + 1 < 20 && ` gratis`}
+                    {Math.max(displayQuestionCount - answeredQuestions, 0)}
+                    {!isPremium && answeredQuestions < 20 && ` gratis`}
                   </span>
                 </div>
-                {!isPremium && currentQuestionIndex + 1 >= 20 && (
+                {!isPremium && answeredQuestions >= 20 && (
                   <div className="mt-3 pt-3 border-t border-gray-200">
                     <p className="text-blue-600 text-xs sm:text-sm text-center font-medium leading-tight">
                       💡 Has completado la prueba gratuita. Desbloquea más preguntas para continuar.

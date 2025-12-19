@@ -70,6 +70,7 @@ export async function POST(req) {
     const body = await req.json();
     const { currentQuestionIndex, correctAnswers, totalAnswered } = body;
 
+
     // Validar datos
     if (typeof currentQuestionIndex !== 'number' || 
         typeof correctAnswers !== 'number' || 
@@ -90,13 +91,43 @@ export async function POST(req) {
       );
     }
 
-    // Guardar el progreso
+    // Leer el progreso actual para evitar regresiones
+    const existing = await getQuizProgress(dbUser.id);
+
+    // Calcular valores "seguros" que nunca disminuyan
+    // Si el usuario tiene 8 en DB, ninguna llamada posterior puede bajarlo a 3
+    // CRITICAL FIX: Si hay inconsistencia (índice > respuestas + 1), usar el índice basado en respuestas
+    const existingIndex = existing?.current_question_index ?? 0;
+    const existingTotal = existing?.total_answered ?? 0;
+    
+    // Detectar inconsistencia: si el índice del DB es mucho mayor que las respuestas, probablemente está mal
+    // (viene de una sesión anónima anterior)
+    let safeIndex;
+    if (existingIndex > existingTotal + 1 && currentQuestionIndex !== undefined && currentQuestionIndex !== null) {
+      // El índice del DB parece incorrecto, usar el índice del cliente (que viene corregido del frontend)
+      safeIndex = Math.max(currentQuestionIndex, 0);
+    } else {
+      // Usar Math.max normal para evitar regresiones
+      safeIndex = Math.max(existingIndex, currentQuestionIndex ?? 0);
+    }
+    
+    const safeTotal = Math.max(
+      existingTotal,
+      totalAnswered ?? 0
+    );
+    const safeCorrect = Math.max(
+      existing?.correct_answers ?? 0,
+      correctAnswers ?? 0
+    );
+
+    // Guardar el progreso usando los valores seguros
     const progress = await saveQuizProgress({
       userId: dbUser.id,
-      currentQuestionIndex,
-      correctAnswers,
-      totalAnswered,
+      currentQuestionIndex: safeIndex,
+      correctAnswers: safeCorrect,
+      totalAnswered: safeTotal,
     });
+
 
     return NextResponse.json({
       success: true,

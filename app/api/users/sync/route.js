@@ -13,24 +13,13 @@ const syncInProgress = new Map();
  * POST /api/users/sync
  */
 export async function POST(req) {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/users/sync/route.js:11',message:'Sync endpoint called',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-  // #endregion
-  
   let userId = null;
   try {
     // Verificar autenticación (ahora el middleware procesa esta ruta)
     const authResult = await auth();
     userId = authResult.userId;
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/users/sync/route.js:17',message:'Auth check completed',data:{hasUserId:!!userId,userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-    // #endregion
 
     if (!userId) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/users/sync/route.js:21',message:'Unauthorized - no userId',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -39,9 +28,6 @@ export async function POST(req) {
 
     // Verificar si ya hay una sincronización en progreso para este usuario
     if (syncInProgress.has(userId)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/users/sync/route.js:35',message:'Sync already in progress for user',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       // Esperar a que termine la sincronización en progreso
       const inProgressPromise = syncInProgress.get(userId);
       try {
@@ -129,9 +115,6 @@ export async function POST(req) {
 
     return NextResponse.json(result);
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/users/sync/route.js:88',message:'Sync error caught',data:{error:error.message,stack:error.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-    // #endregion
     console.error('Error syncing user:', error);
     
     // Asegurarse de limpiar el mapa en caso de error
