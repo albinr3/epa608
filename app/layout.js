@@ -88,6 +88,8 @@ export default function RootLayout({ children }) {
           <LangSetter />
           {children}
         </ClerkProviderWrapper>
+        {/* Vercel Speed Insights */}
+        <SpeedInsights />
       </body>
     </html>
   );
