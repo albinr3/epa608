@@ -146,14 +146,24 @@ export default function QuizEs() {
 
 
   // Guardar estado del quiz en localStorage (guardar en clave compartida para que el progreso persista entre idiomas)
-  const saveQuizState = () => {
+  //
+  // IMPORTANTE (regresión evitada: login con email en ES mostraba "2 completadas" en vez de 3):
+  // - En algunos flujos de Clerk, el login con email puede causar recarga/redirección completa.
+  // - Si el usuario responde la 3ra pregunta y mostramos el modal de auth ANTES de que React aplique
+  //   `setAnsweredQuestions(prev => prev + 1)`, el state en ese tick sigue siendo 2 ("stale").
+  // - Si en ese momento llamamos a `saveQuizState()` sin override, persistimos 2.
+  // - Tras la recarga, el quiz restaura desde localStorage y el usuario ve 2 completadas.
+  //
+  // Regla: cuando necesites persistir progreso en el MISMO tick donde acabas de contestar una pregunta,
+  // usa `saveQuizState({ answeredQuestions: nextAnswered, correctAnswers: nextCorrect, currentQuestionIndex: nextIndex })`.
+  const saveQuizState = (override) => {
     try {
       // Filter out nulls and invalid entries before saving
       const compact = Array.isArray(answers) ? answers.filter(a => a != null && a.questionId != null) : [];
       const quizState = {
-        currentQuestionIndex,
-        correctAnswers,
-        answeredQuestions,
+        currentQuestionIndex: typeof override?.currentQuestionIndex === 'number' ? override.currentQuestionIndex : currentQuestionIndex,
+        correctAnswers: typeof override?.correctAnswers === 'number' ? override.correctAnswers : correctAnswers,
+        answeredQuestions: typeof override?.answeredQuestions === 'number' ? override.answeredQuestions : answeredQuestions,
         answers: compact,
         timestamp: Date.now(),
       };
@@ -682,14 +692,36 @@ export default function QuizEs() {
     // - Esta verificación debe estar presente en AMBAS versiones para mantener consistencia.
     // - Si modificas esta lógica en el futuro, asegúrate de aplicar el cambio en AMBOS archivos (Quiz.js y Quiz-es.js).
     //
-    // Verificar si la siguiente pregunta es #4 (índice 3) y el usuario no está autenticado
-    // Pausar el quiz y mostrar modal de autenticación
+    // Verificar si la siguiente pregunta es #4 (índice 3) y el usuario no está autenticado.
+    //
+    // IMPORTANTE (regresión evitada: login con email en ES mostraba progreso incorrecto):
+    // - En este branch NO debemos depender del state actual para persistir, porque el login puede recargar la página.
+    // - Por eso persistimos con valores post-respuesta (nextAnswered/nextCorrect/nextIndex) y avanzamos el índice
+    //   internamente antes de mostrar el modal.
     if (nextIndex === 3 && !isSignedIn && isLoaded) {
+      // Aplicar progreso "post-respuesta" ANTES de persistir y mostrar el modal.
+      // Esto hace el flujo robusto incluso si el login (email) recarga la página.
+      setAnsweredQuestions((prev) => prev + 1);
+      if (isCorrect) {
+        setCorrectAnswers((prev) => prev + 1);
+      }
+
+      // Avanzar internamente al siguiente índice para que, tras autenticarse,
+      // el usuario continúe en la pregunta 4 sin requerir re-responder la 3ra.
+      setCurrentQuestionIndex(nextIndex);
+      setSelectedAnswer(null);
+      setShowExplanation(false);
+
       setShowAuthModal(true);
-      // No avanzar - pausar el quiz
-      // Pero aún guardar el progreso de la pregunta actual
-      saveQuizState();
-      persistProgress();
+
+      // Persistir con valores calculados (post-respuesta) para evitar restauración con 2/3 inconsistente.
+      // OJO: usar `saveQuizState()` sin override aquí puede reintroducir el bug (state stale).
+      saveQuizState({
+        currentQuestionIndex: nextIndex,
+        correctAnswers: nextCorrect,
+        answeredQuestions: nextAnswered,
+      });
+      persistProgress(); // no-op si no está logueado
       return;
     }
 
