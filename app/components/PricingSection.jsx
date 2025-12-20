@@ -1,6 +1,9 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { CheckCircle2, Shield, Lock, Zap } from 'lucide-react';
+import { useUser } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
 
 export default function PricingSection({ 
   badge = "⚡ FLASH SALE: 60% OFF",
@@ -24,13 +27,70 @@ export default function PricingSection({
   },
   onPurchase
 }) {
-  const handlePurchase = () => {
+  const { isSignedIn, isLoaded } = useUser();
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Cargar script de Lemon Squeezy
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.LemonSqueezy) {
+      const script = document.createElement('script');
+      script.src = 'https://app.lemonsqueezy.com/js/lemon.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  }, []);
+
+  const handlePurchase = async () => {
     if (onPurchase) {
       onPurchase();
-    } else {
-      // Payment logic would go here
-      alert('Redirecting to payment page...');
-      // window.location.href = '/checkout';
+      return;
+    }
+
+    // Verificar autenticación
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      // Redirigir a login si no está autenticado
+      router.push('/sign-in?redirect_url=' + encodeURIComponent(window.location.href));
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Llamar a la API para crear checkout
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create checkout');
+      }
+
+      if (data.checkoutUrl && window.LemonSqueezy) {
+        // Abrir checkout overlay de Lemon Squeezy
+        window.LemonSqueezy.Url.Open(data.checkoutUrl);
+      } else if (data.checkoutUrl) {
+        // Si el script no está cargado, redirigir
+        window.location.href = data.checkoutUrl;
+      } else {
+        throw new Error('No checkout URL received');
+      }
+    } catch (err) {
+      console.error('Error creating checkout:', err);
+      setError(err.message || 'Failed to start checkout. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -78,12 +138,20 @@ export default function PricingSection({
             ))}
           </div>
 
+          {/* Error Message */}
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{error}</p>
+            </div>
+          )}
+
           {/* CTA Button */}
           <button
             onClick={handlePurchase}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg sm:text-xl md:text-2xl py-4 sm:py-5 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-[1.02] mb-4"
+            disabled={isLoading || !isLoaded}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-bold text-lg sm:text-xl md:text-2xl py-4 sm:py-5 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-[1.02] mb-4"
           >
-            {ctaButton}
+            {isLoading ? 'Loading...' : ctaButton}
           </button>
 
           {/* Scarcity Text */}
