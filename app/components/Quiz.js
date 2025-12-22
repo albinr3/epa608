@@ -1088,7 +1088,7 @@ export default function Quiz() {
             />
           </a>
           <div className="flex items-center gap-3 sm:gap-4 md:gap-6 flex-wrap">
-            {!isSignedIn && (
+            {(isSignedIn && !isPremium) && (
               <Link
                 href={isSpanish ? "/es/pricing" : "/pricing"}
                 className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"

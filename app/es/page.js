@@ -68,6 +68,33 @@ function FAQItem({ question, answer }) {
 export default function HomeEs() {
   const { isSignedIn, isLoaded } = useUser();
   const [showQuiz, setShowQuiz] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+
+  // Fetch premium status when user is signed in
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) {
+      setIsPremium(false);
+      return;
+    }
+
+    const fetchPremiumStatus = async () => {
+      try {
+        const response = await fetch('/api/questions?lang=es&category=ALL&count=1', {
+          cache: 'no-store'
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setIsPremium(data.isPremium || false);
+        }
+      } catch (error) {
+        console.error('Error fetching premium status:', error);
+        setIsPremium(false);
+      }
+    };
+
+    fetchPremiumStatus();
+  }, [isLoaded, isSignedIn]);
 
   // Effect to handle redirect after OAuth authentication
   useEffect(() => {
@@ -193,7 +220,7 @@ export default function HomeEs() {
             />
           </Link>
           <div className="flex items-center gap-3 sm:gap-4 md:gap-6 flex-wrap">
-            {!isSignedIn && (
+            {(isSignedIn && !isPremium) && (
               <Link
                 href="/es/pricing"
                 className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
