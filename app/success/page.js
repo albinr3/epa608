@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { CheckCircle2, ArrowRight } from 'lucide-react';
 import { useUser } from '@clerk/nextjs';
 
-export default function SuccessPage() {
+// Componente interno que usa useSearchParams
+function SuccessContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { isSignedIn, isLoaded } = useUser();
@@ -140,6 +141,22 @@ export default function SuccessPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Componente principal que envuelve en Suspense
+export default function SuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SuccessContent />
+    </Suspense>
   );
 }
 
