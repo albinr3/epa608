@@ -1,33 +1,37 @@
 /**
- * Script para migrar preguntas de app/data-en.js y app/es/data.js a Supabase
- * 
- * Uso: npm run seed:questions
- * 
- * Requiere variables de entorno:
- * - SUPABASE_URL
- * - SUPABASE_SERVICE_ROLE_KEY (solo para este script)
+ * Seed / import de preguntas a Supabase desde archivos JS.
+ *
+ * Uso:
+ * 1) Modo default (EN + ES con rutas del proyecto):
+ *    node scripts/seed-questions.js
+ *
+ * 2) Modo single file:
+ *    node scripts/seed-questions.js --lang es --file app/es/data.js
+ *
+ * Flags:
+ *  --ignore-existing   -> NO actualiza existentes (ON CONFLICT DO NOTHING)
+ *  --batch 500         -> tamaño de batch (default 200)
+ *
+ * Requiere env:
+ *  - SUPABASE_URL
+ *  - SUPABASE_SERVICE_ROLE_KEY
  */
 
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { createRequire } from 'module';
+import { dirname, join, resolve } from 'path';
 import vm from 'vm';
 
-// Cargar variables de entorno desde .env.local (o .env como fallback)
+// -------------------------
+// ENV
+// -------------------------
 dotenv.config({ path: '.env.local' });
-// Si no existe .env.local, intentar con .env
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
   dotenv.config({ path: '.env' });
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const require = createRequire(import.meta.url);
-
-// Cargar variables de entorno
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -37,40 +41,86 @@ if (!supabaseUrl || !supabaseServiceKey) {
   process.exit(1);
 }
 
-// Crear cliente de Supabase con service role key (bypass RLS)
+// Cliente Supabase (service role) para bypass RLS
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
+  auth: { autoRefreshToken: false, persistSession: false },
 });
 
+// -------------------------
+// CLI args
+// -------------------------
+const args = process.argv.slice(2);
+
+function getArg(name, fallback = null) {
+  const idx = args.indexOf(name);
+  if (idx === -1) return fallback;
+  const val = args[idx + 1];
+  return val ?? fallback;
+}
+
+const singleFile = getArg('--file');
+const singleLang = getArg('--lang');
+const batchSize = Number(getArg('--batch', '200')) || 200;
+const ignoreExisting = args.includes('--ignore-existing');
+
+// -------------------------
+// Helpers
+// -------------------------
+
 /**
- * Extrae el array de questions de un archivo JS
+ * Extrae el array de questions desde un archivo JS usando VM sandbox.
+ * Soporta:
+ * - export const questions = [...]
+ * - export default [...]
+ * - imports / exports extra
  */
-function extractQuestionsFromFile(filePath, lang) {
+function extractQuestionsFromFile(filePath, langLabel = '') {
   try {
     const content = readFileSync(filePath, 'utf-8');
-    
-    // Reemplazar "export const questions =" por "questions ="
-    const modifiedContent = content.replace(
-      /export\s+const\s+questions\s*=/,
-      'questions ='
-    );
-    
-    // Crear contexto sandbox
-    const sandbox = { questions: null };
+
+    // 1) Quitar imports (VM no los soporta)
+    let modified = content.replace(/^\s*import[\s\S]*?;\s*$/gm, '');
+
+    // 2) Convertir "export const questions =" -> "questions ="
+    modified = modified.replace(/export\s+const\s+questions\s*=\s*/g, 'questions = ');
+
+    // 3) Quitar "export default"
+    modified = modified.replace(/export\s+default\s+/g, '');
+
+    // 4) Quitar exports tipo "export { ... }"
+    modified = modified.replace(/^\s*export\s*\{[\s\S]*?\}\s*;?\s*$/gm, '');
+
+    // 5) Asegurar que exista un binding "questions" en el sandbox
+    // (si el archivo hace "questions = [...]" ya está OK; si hace "const questions = [...]" también está OK)
+    // Igual, creamos una variable en el contexto para capturar.
+    const sandbox = {
+      questions: null,
+      console,
+    };
+
     vm.createContext(sandbox);
-    
+
     // Ejecutar en sandbox
-    vm.runInContext(modifiedContent, sandbox);
-    
-    if (!sandbox.questions || !Array.isArray(sandbox.questions)) {
+    vm.runInContext(modified, sandbox, { timeout: 2000 });
+
+    // Algunas variantes podrían declarar "const questions = [...]"
+    // En VM, eso no lo asigna a sandbox.questions automáticamente.
+    // Para capturarlo, intentamos evaluar "questions" después:
+    let extracted = sandbox.questions;
+    if (!extracted) {
+      try {
+        extracted = vm.runInContext('typeof questions !== "undefined" ? questions : null', sandbox);
+      } catch (_) {
+        extracted = null;
+      }
+    }
+
+    if (!extracted || !Array.isArray(extracted)) {
       throw new Error(`No se encontró el array 'questions' en ${filePath}`);
     }
-    
-    console.log(`✅ Extraídas ${sandbox.questions.length} preguntas de ${lang}`);
-    return sandbox.questions;
+
+    console.log(`✅ Extraídas ${extracted.length} preguntas (${langLabel || 'lang?'}) desde ${filePath}`);
+    return extracted;
   } catch (error) {
     console.error(`❌ Error extrayendo preguntas de ${filePath}:`, error.message);
     throw error;
@@ -78,102 +128,122 @@ function extractQuestionsFromFile(filePath, lang) {
 }
 
 /**
- * Normaliza una pregunta para insertarla en la BD
+ * Normaliza una pregunta para tu schema de Supabase.
  */
 function normalizeQuestion(question, lang) {
   return {
-    source_id: question.id,
-    lang: lang,
+    source_id: Number(question.id),
+    lang,
     category: question.category || 'CORE',
     text: question.text,
-    options: question.options || [],
-    correct_answer: question.correctAnswer || question.correct_answer || 0,
-    explanation: question.explanation || null,
-    image: question.image || null
+    options: Array.isArray(question.options) ? question.options : [],
+    correct_answer:
+      Number.isInteger(question.correctAnswer)
+        ? question.correctAnswer
+        : Number.isInteger(question.correct_answer)
+          ? question.correct_answer
+          : 0,
+    explanation: question.explanation ?? null,
+    image: question.image ?? null,
   };
 }
 
 /**
- * Hace upsert de preguntas por batches
+ * Upsert por batches usando UNIQUE(lang, source_id).
+ * - ignoreExisting = true  -> no toca existentes (do nothing)
+ * - ignoreExisting = false -> actualiza existentes (do update)
  */
-async function upsertQuestions(questions, lang, batchSize = 200) {
-  const normalized = questions.map(q => normalizeQuestion(q, lang));
-  let totalInserted = 0;
-  let totalUpdated = 0;
-  
-  for (let i = 0; i < normalized.length; i += batchSize) {
-    const batch = normalized.slice(i, i + batchSize);
-    
-    try {
-      // Upsert usando unique constraint (lang, source_id)
-      const { data, error } = await supabase
-        .from('questions')
-        .upsert(batch, {
-          onConflict: 'lang,source_id',
-          ignoreDuplicates: false
-        })
-        .select();
-      
-      if (error) {
-        throw error;
-      }
-      
-      // Contar inserts vs updates (aproximado)
-      const inserted = data.filter(d => d.created_at === d.updated_at).length;
-      const updated = data.length - inserted;
-      totalInserted += inserted;
-      totalUpdated += updated;
-      
-      console.log(`  📦 Batch ${Math.floor(i / batchSize) + 1}: ${batch.length} preguntas procesadas`);
-    } catch (error) {
-      console.error(`❌ Error en batch ${Math.floor(i / batchSize) + 1}:`, error.message);
-      throw error;
+async function upsertQuestions(questions, lang, batchSizeLocal) {
+  const normalized = questions.map((q) => normalizeQuestion(q, lang));
+
+  // Validación: duplicados dentro del propio archivo
+  const seen = new Set();
+  for (const q of normalized) {
+    const key = `${q.lang}:${q.source_id}`;
+    if (seen.has(key)) {
+      throw new Error(`Duplicado dentro del archivo para (lang,source_id)=(${q.lang},${q.source_id})`);
     }
+    seen.add(key);
   }
-  
-  return { inserted: totalInserted, updated: totalUpdated };
+
+  let totalProcessed = 0;
+
+  for (let i = 0; i < normalized.length; i += batchSizeLocal) {
+    const batch = normalized.slice(i, i + batchSizeLocal);
+
+    const { error } = await supabase
+      .from('questions')
+      .upsert(batch, {
+        onConflict: 'lang,source_id',
+        ignoreDuplicates: ignoreExisting,
+      });
+
+    if (error) {
+      throw new Error(`Batch ${Math.floor(i / batchSizeLocal) + 1}: ${error.message}`);
+    }
+
+    totalProcessed += batch.length;
+    console.log(`  📦 Batch ${Math.floor(i / batchSizeLocal) + 1}: OK (${totalProcessed}/${normalized.length})`);
+  }
+
+  return { processed: totalProcessed };
 }
 
-/**
- * Función principal
- */
+// -------------------------
+// Main
+// -------------------------
 async function main() {
-  console.log('🚀 Iniciando seed de preguntas...\n');
-  
+  console.log('🚀 Iniciando import/seed de preguntas...\n');
+  console.log(`⚙️  batchSize=${batchSize} | ignoreExisting=${ignoreExisting}\n`);
+
   try {
-    // Rutas de los archivos
+    // Modo single-file por CLI
+    if (singleFile && singleLang) {
+      if (singleLang !== 'en' && singleLang !== 'es') {
+        throw new Error(`--lang debe ser 'en' o 'es' (recibido: ${singleLang})`);
+      }
+
+      const absPath = resolve(process.cwd(), singleFile);
+      const qs = extractQuestionsFromFile(absPath, singleLang);
+
+      console.log('\n📤 Subiendo a Supabase...\n');
+      const result = await upsertQuestions(qs, singleLang, batchSize);
+
+      console.log('\n🎉 Importación completada!');
+      console.log(`📊 Procesadas: ${result.processed} (${singleLang})`);
+      return;
+    }
+
+    // Modo default (tus rutas originales)
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+
     const dataEnPath = join(__dirname, '..', 'app', 'data-en.js');
     const dataEsPath = join(__dirname, '..', 'app', 'es', 'data.js');
-    
-    // Extraer preguntas
+
     const questionsEn = extractQuestionsFromFile(dataEnPath, 'en');
     const questionsEs = extractQuestionsFromFile(dataEsPath, 'es');
-    
-    console.log('\n📤 Insertando preguntas en Supabase...\n');
-    
-    // Insertar preguntas EN
+
+    console.log('\n📤 Subiendo a Supabase...\n');
+
     console.log('📝 Procesando preguntas EN...');
-    const resultEn = await upsertQuestions(questionsEn, 'en');
-    console.log(`✅ EN: ${resultEn.inserted} insertadas, ${resultEn.updated} actualizadas\n`);
-    
-    // Insertar preguntas ES
+    const resultEn = await upsertQuestions(questionsEn, 'en', batchSize);
+    console.log(`✅ EN: ${resultEn.processed} procesadas\n`);
+
     console.log('📝 Procesando preguntas ES...');
-    const resultEs = await upsertQuestions(questionsEs, 'es');
-    console.log(`✅ ES: ${resultEs.inserted} insertadas, ${resultEs.updated} actualizadas\n`);
-    
+    const resultEs = await upsertQuestions(questionsEs, 'es', batchSize);
+    console.log(`✅ ES: ${resultEs.processed} procesadas\n`);
+
     console.log('🎉 Seed completado exitosamente!');
-    console.log(`\n📊 Resumen:`);
+    console.log('\n📊 Resumen:');
     console.log(`   EN: ${questionsEn.length} preguntas`);
     console.log(`   ES: ${questionsEs.length} preguntas`);
     console.log(`   Total: ${questionsEn.length + questionsEs.length} preguntas`);
-    
   } catch (error) {
     console.error('\n❌ Error fatal:', error.message);
-    console.error(error.stack);
+    if (error?.stack) console.error(error.stack);
     process.exit(1);
   }
 }
 
-// Ejecutar
 main();
-

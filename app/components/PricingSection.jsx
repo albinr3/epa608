@@ -63,7 +63,9 @@ export default function PricingSection({
     setError(null);
 
     try {
-      // Llamar a la API para crear checkout
+      // Anti-regresión:
+      // Este botón NO debe llamar a Lemon Squeezy directo (API key se expondría en el browser).
+      // Siempre pedimos al backend `/api/checkout` que devuelva `checkoutUrl`.
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: {

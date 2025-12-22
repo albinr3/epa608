@@ -3,6 +3,8 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
+// Anti-regresión: este `PricingSection-es` debe mantenerse funcionalmente equivalente al pricing en inglés
+// (`app/components/PricingSection.jsx`) en el flujo de checkout (auth → POST /api/checkout → overlay).
 import PricingSection from '../../components/PricingSection-es';
 import LanguageSelector from '../../components/LanguageSelector';
 

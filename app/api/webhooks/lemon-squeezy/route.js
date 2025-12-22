@@ -29,11 +29,20 @@ export async function POST(req) {
     const body = await req.text();
     
     // Verificar la firma del webhook
-    const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
-    const digest = hmac.update(body).digest('hex');
-    const expectedSignature = Buffer.from(digest, 'hex').toString('base64');
+    // Lemon Squeezy envía `x-signature` como HMAC-SHA256 del body en HEX (64 chars).
+    // Si comparamos contra base64 (u otro encoding), siempre dará 401 "Invalid signature".
+    const expectedSignatureHex = crypto
+      .createHmac('sha256', WEBHOOK_SECRET)
+      .update(body, 'utf8')
+      .digest('hex');
 
-    if (signature !== expectedSignature) {
+    // Comparación en tiempo constante (evita timing attacks)
+    const sig = signature.trim();
+    const signatureOk =
+      sig.length === expectedSignatureHex.length &&
+      crypto.timingSafeEqual(Buffer.from(sig, 'utf8'), Buffer.from(expectedSignatureHex, 'utf8'));
+
+    if (!signatureOk) {
       console.error('Invalid webhook signature');
       return new Response('Invalid signature', { status: 401 });
     }

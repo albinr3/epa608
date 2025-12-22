@@ -1,10 +1,16 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import { LemonSqueezy } from '@lemonsqueezy/lemonsqueezy.js';
-import { getUserByClerkId } from '@/lib/db/users';
+import { createCheckout, lemonSqueezySetup } from '@lemonsqueezy/lemonsqueezy.js';
 import { ensureUserExists } from '@/lib/db/ensureUserExists';
 
-const ls = new LemonSqueezy(process.env.LEMONSQUEEZY_API_KEY);
+/**
+ * ⚠️ Anti-regresión (bug real):
+ * - Con `@lemonsqueezy/lemonsqueezy.js` v2 el SDK es *funcional* (tree-shakeable) y se configura con `lemonSqueezySetup()`.
+ * - El enfoque antiguo `new LemonSqueezy(apiKey).checkouts.create(...)` NO existe en v2 (`checkouts` es undefined) y rompe con:
+ *   "Cannot read properties of undefined (reading 'create')".
+ * - Por eso aquí usamos `createCheckout(...)` (función) y NO un cliente con `.checkouts.create`.
+ */
+lemonSqueezySetup({ apiKey: process.env.LEMONSQUEEZY_API_KEY });
 
 /**
  * POST /api/checkout
@@ -53,38 +59,41 @@ export async function POST(req) {
     const successUrl = `${baseUrl}/success?checkout=success`;
     const customPrice = 999; // $9.99 en centavos
 
-    // Crear checkout session en Lemon Squeezy
-    const checkout = await ls.checkouts.create({
-      storeId: process.env.LEMONSQUEEZY_STORE_ID,
-      variantId: process.env.LEMONSQUEEZY_VARIANT_ID,
-      customPrice: customPrice,
-      productOptions: {
-        name: 'EPA 608 Practice Test - Lifetime Access',
-        description: 'Unlimited access to 300+ real exam questions with detailed explanations',
-      },
-      checkoutOptions: {
-        embed: true, // Para usar overlay
-        media: false,
-        logo: false,
-        desc: true,
-        discount: false,
-        dark: false,
-        subscriptionPreview: false,
-      },
-      checkoutData: {
-        email: email,
-        name: `${firstName} ${lastName}`.trim() || email,
-        custom: {
-          clerk_id: userId, // Para identificar al usuario en el webhook
+    // Crear checkout session en Lemon Squeezy (SDK v2, API funcional)
+    const { data: checkout, error: checkoutError, statusCode } = await createCheckout(
+      process.env.LEMONSQUEEZY_STORE_ID,
+      process.env.LEMONSQUEEZY_VARIANT_ID,
+      {
+        // Nota: `successUrl` está disponible si luego queremos incorporarlo (según capacidades del checkout de Lemon Squeezy).
+        customPrice: customPrice,
+        productOptions: {
+          name: 'EPA 608 Practice Test - Lifetime Access',
+          description: 'Unlimited access to 300+ real exam questions with detailed explanations',
         },
-      },
-      preview: false,
-      testMode: process.env.NEXT_PUBLIC_SITE_URL?.includes('localhost') || false,
-      expiresAt: null,
-    });
+        checkoutOptions: {
+          embed: true, // Para usar overlay
+          media: false,
+          logo: false,
+          desc: true,
+          discount: false,
+          dark: false,
+          subscriptionPreview: false,
+        },
+        checkoutData: {
+          email: email,
+          name: `${firstName} ${lastName}`.trim() || email,
+          custom: {
+            clerk_id: userId, // Para identificar al usuario en el webhook
+          },
+        },
+        preview: false,
+        testMode: process.env.NEXT_PUBLIC_SITE_URL?.includes('localhost') || false,
+        expiresAt: null,
+      }
+    );
 
-    if (!checkout || !checkout.data) {
-      throw new Error('Failed to create checkout session');
+    if (checkoutError || !checkout?.data?.attributes?.url) {
+      throw new Error(checkoutError?.message || 'Failed to create checkout session');
     }
 
     // Retornar la URL del checkout
