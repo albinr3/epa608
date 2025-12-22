@@ -76,7 +76,7 @@ export default clerkMiddleware(async (auth, request) => {
    * ⚠️ NO ELIMINAR: Este fix resuelve un bug crítico de UX.
    * Si se elimina, el problema regresará y los usuarios verán el idioma incorrecto
    * después de autenticarse con Google. Este bloque debe mantenerse ANTES de la
-   * lógica de idioma general para funcionar correctamente.
+   * lógica de idioma general para funcionar correctamente.d
    */
   if (pathname === "/" && !hasClerkCallback) {
     const languagePreference = request.cookies.get("language-preference")?.value;
