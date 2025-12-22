@@ -33,7 +33,7 @@ function LiveCounter({ initial = 0 }) {
   return <span>{count}</span>;
 }
 
-// Componente FAQ Acordeón
+// Componente FAQ Acordeónc
 function FAQItem({ question, answer }) {
   const [isOpen, setIsOpen] = useState(false);
 
