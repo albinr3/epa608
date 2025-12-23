@@ -130,7 +130,20 @@ function extractQuestionsFromFile(filePath, langLabel = '') {
 /**
  * Normaliza una pregunta para tu schema de Supabase.
  */
+/**
+ * Normaliza una pregunta para tu schema de Supabase.
+ * 
+ * ⚠️ IMPORTANTE: Corrige rutas de imágenes que tienen "/public/"
+ * En Next.js, las imágenes en public/ se acceden sin el prefijo "/public"
+ * Ejemplo: "/public/quiz-images/figure-i-2.png" -> "/quiz-images/figure-i-2.png"
+ */
 function normalizeQuestion(question, lang) {
+  // Corregir ruta de imagen si tiene "/public/"
+  let imagePath = question.image ?? null;
+  if (imagePath && typeof imagePath === 'string' && imagePath.startsWith('/public/')) {
+    imagePath = imagePath.replace('/public/', '/');
+  }
+  
   return {
     source_id: Number(question.id),
     lang,
@@ -144,7 +157,7 @@ function normalizeQuestion(question, lang) {
           ? question.correct_answer
           : 0,
     explanation: question.explanation ?? null,
-    image: question.image ?? null,
+    image: imagePath,
   };
 }
 

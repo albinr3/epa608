@@ -896,6 +896,42 @@ export default function Quiz() {
     const nextAnswered = answeredQuestions + 1;
     const nextCorrect = correctAnswers + (isCorrect ? 1 : 0);
 
+    /**
+     * ⚠️ BUG FIX (Bug #1 - English): Block further progress AFTER user closes premium modal
+     * 
+     * PROBLEMA ORIGINAL:
+     * - Usuario completaba 20 preguntas y aparecía el modal premium
+     * - Usuario cerraba el modal haciendo clic en la X o fuera del modal
+     * - Usuario podía seguir haciendo clic en "Next" o "Finish" y continuar contestando
+     * - El score seguía incrementando aunque el usuario no era premium
+     * 
+     * CAUSA RAÍZ:
+     * - No había verificación que bloqueara el progreso después de cerrar el modal
+     * - El código solo verificaba `nextAnswered === 20` para mostrar el modal, pero no
+     *   bloqueaba el progreso si el usuario ya tenía 20+ preguntas respondidas
+     * 
+     * SOLUCIÓN:
+     * - Verificar `answeredQuestions >= 20` ANTES de incrementar contadores
+     * - Si el usuario tiene 20+ preguntas y no es premium, bloquear el progreso
+     * - Re-mostrar el modal si fue cerrado
+     * - NO incrementar contadores para prevenir que el score aumente
+     * 
+     * ⚠️ CRITICAL: Esta verificación debe estar ANTES de incrementar contadores.
+     * Si se mueve después, el score seguirá incrementando cuando el usuario hace clic
+     * múltiples veces en "Finish" después de completar 20 preguntas.
+     * 
+     * ⚠️ NO REMOVER: Esta verificación es esencial para prevenir que usuarios no premium
+     * continúen después de las 20 preguntas gratuitas.
+     */
+    if (answeredQuestions >= 20 && !isPremium && !isRestoring && !isLoadingFromDatabase) {
+      // Re-show modal if it was closed
+      if (!showPremiumModal) {
+        setShowPremiumModal(true);
+      }
+      // DO NOT increment counters - this prevents score from increasing
+      return;
+    }
+
     // AHÍ incrementar contadores
     setAnsweredQuestions((prev) => prev + 1);
     if (isCorrect) {
@@ -955,6 +991,7 @@ export default function Quiz() {
       persistProgress();
       return;
     }
+    
 
     // Advance to next question only if user is signed in (for question 4+) or if it's before question 4
     // Also check if next question is within available questions
@@ -983,12 +1020,45 @@ export default function Quiz() {
     }
   };
 
-  // Load Lemon Squeezy script
+  /**
+   * ⚠️ CRITICAL: Lemon Squeezy Overlay Initialization
+   * 
+   * PROBLEMA RESUELTO: Sin esta inicialización, el checkout redirige a una página externa
+   * en lugar de mostrar un modal overlay en nuestra web.
+   * 
+   * CAUSA RAÍZ: El script de Lemon Squeezy (`lemon.js`) se carga pero NO inicializa
+   * automáticamente `window.LemonSqueezy.Url.Open()`. Esta función solo está disponible
+   * después de llamar a `window.createLemonSqueezy()`.
+   * 
+   * SIN `createLemonSqueezy()`:
+   * - `window.LemonSqueezy` puede existir pero `window.LemonSqueezy.Url.Open` es undefined
+   * - El código cae en el fallback de `window.location.href = data.checkoutUrl`
+   * - El usuario es redirigido a la página externa de Lemon Squeezy
+   * 
+   * CON `createLemonSqueezy()`:
+   * - `window.LemonSqueezy.Url.Open()` está disponible
+   * - El checkout se abre como overlay modal dentro de nuestra web
+   * - Mejor experiencia de usuario (no sale de la página)
+   * 
+   * ⚠️ NO REMOVER: Esta inicialización es esencial para que el overlay funcione.
+   * Si se remueve, el checkout volverá a redirigir en lugar de mostrar el modal.
+   */
   useEffect(() => {
     if (typeof window !== 'undefined' && !window.LemonSqueezy) {
       const script = document.createElement('script');
       script.src = 'https://app.lemonsqueezy.com/js/lemon.js';
       script.async = true;
+      script.onload = () => {
+        // CRITICAL: Inicializar Lemon Squeezy para habilitar el overlay
+        // Sin esto, window.LemonSqueezy.Url.Open() no estará disponible
+        if (typeof window.createLemonSqueezy === 'function') {
+          try {
+            window.createLemonSqueezy();
+          } catch (err) {
+            console.error('Error initializing Lemon Squeezy:', err);
+          }
+        }
+      };
       document.body.appendChild(script);
     }
   }, []);
@@ -997,25 +1067,29 @@ export default function Quiz() {
     setShowPremiumModal(false);
     setCheckoutError(null);
     // User stays on current question (we don't advance if not premium)
+    // NOTE: If user has 20+ questions and is not premium, handleNext will block further progress
   };
 
+  /**
+   * Handle upgrade to premium - opens Lemon Squeezy checkout
+   * 
+   * CRITICAL: This function must NOT close the modal immediately.
+   * The modal should remain open so the user can see the Lemon Squeezy checkout overlay.
+   * Only close the modal if there's an error or if the user manually closes it.
+   * 
+   * Flow:
+   * 1. Verify user is authenticated
+   * 2. Call /api/checkout to get checkout URL
+   * 3. Open Lemon Squeezy overlay using window.LemonSqueezy.Url.Open()
+   * 4. Keep modal open so user can complete checkout
+   */
   const handleUpgrade = async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1003',message:'handleUpgrade called',data:{isSignedIn,isLoaded,lemonSqueezyLoaded:typeof window !== 'undefined' && !!window.LemonSqueezy},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
     // Verificar autenticación
     if (!isLoaded) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1010',message:'handleUpgrade - Clerk not loaded',data:{isLoaded},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return;
     }
 
     if (!isSignedIn) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1016',message:'handleUpgrade - user not signed in, redirecting',data:{isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       // Redirigir a login si no está autenticado
       router.push('/sign-in?redirect_url=' + encodeURIComponent(window.location.href));
       return;
@@ -1025,10 +1099,6 @@ export default function Quiz() {
     setCheckoutError(null);
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1026',message:'handleUpgrade - calling /api/checkout',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      
       // Llamar a la API de checkout
       const response = await fetch('/api/checkout', {
         method: 'POST',
@@ -1039,34 +1109,48 @@ export default function Quiz() {
 
       const data = await response.json();
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1040',message:'handleUpgrade - checkout response received',data:{ok:response.ok,hasCheckoutUrl:!!data.checkoutUrl,hasLemonSqueezy:typeof window !== 'undefined' && !!window.LemonSqueezy,error:data.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-
       if (!response.ok) {
         throw new Error(data.error || 'Failed to create checkout');
       }
 
+      /**
+       * ⚠️ CRITICAL: Lemon Squeezy Overlay vs Redirect
+       * 
+       * PREFERENCIA: Siempre intentar abrir el overlay primero (mejor UX).
+       * Solo redirigir si el overlay no está disponible.
+       * 
+       * FLUJO:
+       * 1. Si `window.LemonSqueezy.Url.Open` existe → Abrir overlay (modal en nuestra web)
+       * 2. Si no existe pero hay checkoutUrl → Redirigir (fallback)
+       * 
+       * ⚠️ NO CAMBIAR: El orden es importante. Verificar `Url.Open` antes de redirigir
+       * asegura que usamos el overlay cuando está disponible.
+       * 
+       * NOTA: NO cerrar el modal premium aquí - dejarlo abierto para que el usuario
+       * vea el checkout overlay encima del modal.
+       */
       if (data.checkoutUrl && window.LemonSqueezy) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1047',message:'handleUpgrade - opening Lemon Squeezy overlay',data:{checkoutUrl:data.checkoutUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
-        // Abrir checkout overlay de Lemon Squeezy
-        // NO cerrar el modal aquí - dejarlo abierto para que el usuario vea el checkout
-        window.LemonSqueezy.Url.Open(data.checkoutUrl);
+        try {
+          // Intentar abrir overlay (preferido - modal en nuestra web)
+          if (window.LemonSqueezy.Url && window.LemonSqueezy.Url.Open) {
+            // NO cerrar el modal aquí - dejarlo abierto para que el usuario vea el checkout
+            window.LemonSqueezy.Url.Open(data.checkoutUrl);
+          } else {
+            // Fallback: overlay no disponible, redirigir
+            window.location.href = data.checkoutUrl;
+          }
+        } catch (err) {
+          // Si hay error al abrir overlay, redirigir como fallback
+          console.error('Error opening Lemon Squeezy overlay:', err);
+          window.location.href = data.checkoutUrl;
+        }
       } else if (data.checkoutUrl) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1052',message:'handleUpgrade - redirecting to checkout (script not loaded)',data:{checkoutUrl:data.checkoutUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
-        // Si el script no está cargado, redirigir
+        // Script no cargado, redirigir directamente
         window.location.href = data.checkoutUrl;
       } else {
         throw new Error('No checkout URL received');
       }
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1058',message:'handleUpgrade - ERROR',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       console.error('Error creating checkout:', err);
       setCheckoutError(err.message || 'Failed to start checkout. Please try again.');
     } finally {
@@ -1310,16 +1394,30 @@ export default function Quiz() {
             {/* Question Section - Takes 2 columns on desktop */}
             <div className="lg:col-span-2 order-1 bg-white border border-gray-200 rounded-xl p-6 md:p-8 shadow-sm">
               {/* Image reference (if available) */}
+              {/* 
+                ⚠️ BUG FIX: Corrección de rutas de imágenes
+                
+                PROBLEMA: Algunas rutas en la base de datos tienen "/public/" (incorrecto)
+                En Next.js, las imágenes en public/ se acceden sin el prefijo "/public"
+                
+                SOLUCIÓN: 
+                1. Script SQL (scripts/fix-image-paths.sql) corrige todas las rutas en la BD
+                2. Script de seeding (seed-questions.mjs) corrige rutas al importar
+                3. Esta corrección en el código es un fallback por si quedan rutas incorrectas
+                
+                NOTA: La corrección en el código es temporal. Lo ideal es corregir la BD.
+              */}
               {currentQuestion.image && (
                 <div className="mb-6 w-full">
                   <div className="relative w-full h-auto rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
                     <Image
-                      src={currentQuestion.image}
+                      src={currentQuestion.image.startsWith('/public/') ? currentQuestion.image.replace('/public', '') : currentQuestion.image}
                       alt="Question reference image"
                       width={800}
                       height={600}
                       className="w-full h-auto object-contain"
                       priority={currentQuestionIndex < 3}
+                      unoptimized={currentQuestion.image.startsWith('http')}
                     />
                   </div>
                 </div>
@@ -1401,9 +1499,23 @@ export default function Quiz() {
             {/* Next Button - Before score on mobile, after on desktop */}
             {isAnswered && (
               <div className="order-2 lg:order-3 lg:col-span-3 flex justify-end">
+                {/* 
+                  ⚠️ BUG FIX (Bug #1): Deshabilitar botón después de 20 preguntas
+                  
+                  PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
+                  también deshabilitamos visualmente el botón para mejor UX.
+                  
+                  Esto previene que el usuario intente hacer clic múltiples veces y
+                  proporciona feedback visual claro de que no puede continuar sin premium.
+                */}
                 <button
                   onClick={handleNext}
-                  className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl"
+                  disabled={answeredQuestions >= 20 && !isPremium}
+                  className={`px-8 py-3 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg ${
+                    answeredQuestions >= 20 && !isPremium
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+                  }`}
                 >
                   {currentQuestionIndex + 1 < displayQuestionCount
                     ? "Next"
@@ -1512,7 +1624,7 @@ export default function Quiz() {
                         $29.99
                       </span>
                       <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-blue-600">
-                        $11.99
+                        $9.99
                       </span>
                     </div>
                     <p className="text-xs sm:text-sm text-gray-600 mt-1">

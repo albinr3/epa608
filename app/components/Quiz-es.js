@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { CheckCircle2, Shield, Lock, Zap } from 'lucide-react';
 import { useUser, SignInButton, UserButton } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import AuthModal from './AuthModal';
@@ -13,12 +14,15 @@ const QUIZ_STORAGE_KEY_ES = 'epa608_quiz_progress_es';
 
 export default function QuizEs() {
   const { isSignedIn, isLoaded } = useUser();
+  const router = useRouter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showExplanation, setShowExplanation] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isLoadingCheckout, setIsLoadingCheckout] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
   const [correctAnswers, setCorrectAnswers] = useState(0);
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
   const [answers, setAnswers] = useState([]); // Track answers for persistence
@@ -628,13 +632,38 @@ export default function QuizEs() {
     }
   }, [currentQuestionIndex, isSignedIn, isLoaded, showAuthModal]);
 
-  // Efecto para mostrar el modal cuando se accede directamente a pregunta premium
+  // Effect to show modal when directly accessing premium question
   useEffect(() => {
-    const question = questions[currentQuestionIndex];
-    if (question && question.id === 21 && !isPremium) {
+    // No mostrar modal mientras se están cargando las preguntas
+    if (isLoadingQuestions || availableQuestions.length === 0) {
+      return;
+    }
+    
+    // CRITICAL FIX: Don't show modal if we're still restoring state
+    // This prevents showing the modal incorrectly when user returns to quiz
+    if (isRestoring || isLoadingFromDatabase) {
+      return;
+    }
+    
+    /**
+     * CRITICAL FIX: Show premium modal when user completes exactly 20 questions
+     * 
+     * This useEffect serves as a backup check in case the modal wasn't triggered
+     * in handleNext (e.g., if user navigates directly or state changes occur).
+     * 
+     * IMPORTANT: We check `answeredQuestions === 20` (not `>= 20`)
+     * 
+     * Why this matters:
+     * - Must match the condition in handleNext to ensure consistency
+     * - Using `>= 20` can cause the modal to appear incorrectly if answeredQuestions
+     *   gets out of sync with the actual question index
+     * 
+     * DO NOT CHANGE: This condition must remain `answeredQuestions === 20` to prevent regression.
+     */
+    if (availableQuestions.length > 0 && answeredQuestions === 20 && !isPremium && !isRestoring && !isLoadingFromDatabase) {
       setShowPremiumModal(true);
     }
-  }, [currentQuestionIndex, isPremium]);
+  }, [currentQuestionIndex, isPremium, isSignedIn, isLoadingQuestions, availableQuestions.length, answeredQuestions, isRestoring, isLoadingFromDatabase]);
 
   const handleAnswerClick = (optionIndex) => {
     if (isAnswered) return; // No permitir cambiar la respuesta después de seleccionar
@@ -725,20 +754,88 @@ export default function QuizEs() {
       return;
     }
 
+    /**
+     * ⚠️ BUG FIX (Bug #3 - Spanish): Modal premium no aparecía después de 20 preguntas
+     * 
+     * PROBLEMA ORIGINAL:
+     * - Usuario completaba 20 preguntas en español
+     * - El modal premium NO aparecía automáticamente
+     * - El botón "Finalizar" se deshabilitaba, pero el usuario no veía el popup de "Get Instant Access"
+     * 
+     * CAUSA RAÍZ:
+     * - El componente español usaba `nextIndex >= availableQuestions.length` en lugar de
+     *   `nextAnswered === 20` como el componente inglés
+     * - Esta verificación se ejecutaba DESPUÉS de incrementar contadores y solo cuando
+     *   el usuario intentaba ir a la pregunta 21 (índice 20)
+     * - Si el usuario estaba en la pregunta 20 (índice 19), `nextIndex` sería 20, pero
+     *   `availableQuestions.length` también era 20, por lo que la condición no se cumplía
+     * 
+     * SOLUCIÓN:
+     * - Cambiar a `nextAnswered === 20` igual que el componente inglés
+     * - Verificar ANTES de incrementar contadores para mostrar el modal en el momento correcto
+     * - Esto asegura que el modal aparezca exactamente cuando el usuario completa la pregunta 20
+     * 
+     * ⚠️ CRITICAL: Esta condición debe ser `nextAnswered === 20` (no `>= 20` y no basada en índice).
+     * Usar `>= 20` puede causar que el modal aparezca demasiado temprano si hay desincronización.
+     * Usar `nextIndex >= availableQuestions.length` causa que el modal aparezca demasiado tarde.
+     * 
+     * ⚠️ NO CAMBIAR: Esta condición debe permanecer `nextAnswered === 20` para prevenir regresión.
+     */
+    if (nextAnswered === 20 && !isPremium && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
+      // Increment counters before showing modal (so answeredQuestions becomes 20)
+      setAnsweredQuestions((prev) => prev + 1);
+      if (isCorrect) {
+        setCorrectAnswers((prev) => prev + 1);
+      }
+      setShowPremiumModal(true);
+      // Save progress before showing modal
+      saveQuizState();
+      persistProgress();
+      return;
+    }
+
+    /**
+     * ⚠️ BUG FIX (Bug #2 - Spanish): Block further progress AFTER user closes premium modal
+     * 
+     * PROBLEMA ORIGINAL:
+     * - Usuario completaba 20 preguntas y aparecía el modal premium
+     * - Usuario cerraba el modal
+     * - Botón "Finalizar" estaba deshabilitado (correcto)
+     * - PERO: Si el usuario hacía clic múltiples veces en "Finalizar", el score seguía
+     *   incrementando (21, 22, 23...) aunque las preguntas no avanzaban
+     * 
+     * CAUSA RAÍZ:
+     * - La verificación de bloqueo estaba DESPUÉS de incrementar contadores
+     * - Cuando el usuario hacía clic en "Finalizar", los contadores se incrementaban primero
+     * - Luego se verificaba si debía bloquear, pero el daño ya estaba hecho (score aumentado)
+     * - El botón estaba deshabilitado visualmente, pero `handleNext` seguía ejecutándose
+     * 
+     * SOLUCIÓN:
+     * - Verificar `answeredQuestions >= 20` ANTES de incrementar contadores
+     * - Si el usuario tiene 20+ preguntas y no es premium, bloquear el progreso inmediatamente
+     * - Re-mostrar el modal si fue cerrado
+     * - NO incrementar contadores para prevenir que el score aumente
+     * 
+     * ⚠️ CRITICAL: Esta verificación debe estar ANTES de incrementar contadores.
+     * Si se mueve después, el score seguirá incrementando cuando el usuario hace clic
+     * múltiples veces en "Finalizar" después de completar 20 preguntas.
+     * 
+     * ⚠️ NO REMOVER: Esta verificación es esencial para prevenir que usuarios no premium
+     * continúen después de las 20 preguntas gratuitas y que el score aumente incorrectamente.
+     */
+    if (answeredQuestions >= 20 && !isPremium && !isRestoring && !isLoadingFromDatabase) {
+      // Re-show modal if it was closed
+      if (!showPremiumModal) {
+        setShowPremiumModal(true);
+      }
+      // DO NOT increment counters - this prevents score from increasing
+      return;
+    }
+
     // AHÍ incrementar contadores
     setAnsweredQuestions((prev) => prev + 1);
     if (isCorrect) {
       setCorrectAnswers((prev) => prev + 1);
-    }
-
-    // Verificar si la siguiente pregunta está más allá de las preguntas disponibles para usuarios no premium
-    // CRITICAL FIX: No mostrar modal premium si aún estamos restaurando estado
-    if (nextIndex >= availableQuestions.length && !isPremium && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
-      setShowPremiumModal(true);
-      // Guardar progreso antes de mostrar modal
-      saveQuizState();
-      persistProgress();
-      return;
     }
 
     // Avanzar a la siguiente pregunta solo si el usuario está autenticado (para pregunta 4+) o si es antes de la pregunta 4
@@ -767,21 +864,165 @@ export default function QuizEs() {
     }
   };
 
+  /**
+   * ⚠️ CRITICAL: Lemon Squeezy Overlay Initialization
+   * 
+   * PROBLEMA RESUELTO: Sin esta inicialización, el checkout redirige a una página externa
+   * en lugar de mostrar un modal overlay en nuestra web.
+   * 
+   * CAUSA RAÍZ: El script de Lemon Squeezy (`lemon.js`) se carga pero NO inicializa
+   * automáticamente `window.LemonSqueezy.Url.Open()`. Esta función solo está disponible
+   * después de llamar a `window.createLemonSqueezy()`.
+   * 
+   * SIN `createLemonSqueezy()`:
+   * - `window.LemonSqueezy` puede existir pero `window.LemonSqueezy.Url.Open` es undefined
+   * - El código cae en el fallback de `window.location.href = data.checkoutUrl`
+   * - El usuario es redirigido a la página externa de Lemon Squeezy
+   * 
+   * CON `createLemonSqueezy()`:
+   * - `window.LemonSqueezy.Url.Open()` está disponible
+   * - El checkout se abre como overlay modal dentro de nuestra web
+   * - Mejor experiencia de usuario (no sale de la página)
+   * 
+   * ⚠️ NO REMOVER: Esta inicialización es esencial para que el overlay funcione.
+   * Si se remueve, el checkout volverá a redirigir en lugar de mostrar el modal.
+   */
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.LemonSqueezy) {
+      const script = document.createElement('script');
+      script.src = 'https://app.lemonsqueezy.com/js/lemon.js';
+      script.async = true;
+      script.onload = () => {
+        // CRITICAL: Inicializar Lemon Squeezy para habilitar el overlay
+        // Sin esto, window.LemonSqueezy.Url.Open() no estará disponible
+        if (typeof window.createLemonSqueezy === 'function') {
+          try {
+            window.createLemonSqueezy();
+          } catch (err) {
+            console.error('Error initializing Lemon Squeezy:', err);
+          }
+        }
+      };
+      document.body.appendChild(script);
+    }
+  }, []);
+
   const handleCloseModal = () => {
     setShowPremiumModal(false);
+    setCheckoutError(null);
     // El usuario se queda en la pregunta actual (no avanzamos si no es premium)
+    // NOTE: If user has 20+ questions and is not premium, handleNext will block further progress
   };
 
-  const handleUpgrade = () => {
-    // Aquí iría la lógica de pago real
-    setIsPremium(true);
-    setShowPremiumModal(false);
-    // Avanzar a la siguiente pregunta después de hacer premium
-    const nextIndex = currentQuestionIndex + 1;
-    if (nextIndex < questions.length) {
-      setCurrentQuestionIndex(nextIndex);
-      setSelectedAnswer(null);
-      setShowExplanation(false);
+  /**
+   * ⚠️ BUG FIX (Bug #4 - Spanish): Botón "Obtener Acceso" solo cerraba el modal
+   * 
+   * PROBLEMA ORIGINAL:
+   * - Usuario completaba 20 preguntas y aparecía el modal premium
+   * - Usuario hacía clic en "Obtener Acceso Inmediato"
+   * - El modal simplemente se cerraba en lugar de abrir el checkout de Lemon Squeezy
+   * - No se mostraba ningún overlay de pago
+   * 
+   * CAUSA RAÍZ:
+   * - El componente español tenía un `handleUpgrade` simplificado que solo hacía:
+   *   `setIsPremium(true); setShowPremiumModal(false);`
+   * - No llamaba a la API `/api/checkout`
+   * - No inicializaba el script de Lemon Squeezy
+   * - No abría el overlay de checkout
+   * 
+   * SOLUCIÓN:
+   * - Reemplazar `handleUpgrade` simplificado con la versión completa del componente inglés
+   * - Agregar estados `isLoadingCheckout` y `checkoutError` para manejar el estado del checkout
+   * - Agregar `useEffect` para cargar e inicializar el script de Lemon Squeezy
+   * - Llamar a `/api/checkout` para obtener la URL de checkout
+   * - Abrir el overlay de Lemon Squeezy usando `window.LemonSqueezy.Url.Open()`
+   * - Mantener el modal premium abierto mientras se muestra el checkout overlay
+   * 
+   * ⚠️ CRITICAL: Esta función NO debe cerrar el modal inmediatamente.
+   * El modal debe permanecer abierto para que el usuario vea el checkout overlay de Lemon Squeezy.
+   * Solo cerrar el modal si hay un error o si el usuario lo cierra manualmente.
+   * 
+   * ⚠️ NO SIMPLIFICAR: Esta función debe mantener toda la lógica de checkout.
+   * Si se simplifica, el checkout volverá a fallar.
+   * 
+   * Flow:
+   * 1. Verify user is authenticated
+   * 2. Call /api/checkout to get checkout URL
+   * 3. Open Lemon Squeezy overlay using window.LemonSqueezy.Url.Open()
+   * 4. Keep modal open so user can complete checkout
+   */
+  const handleUpgrade = async () => {
+    // Verificar autenticación
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      // Redirigir a login si no está autenticado
+      router.push('/sign-in?redirect_url=' + encodeURIComponent(window.location.href));
+      return;
+    }
+
+    setIsLoadingCheckout(true);
+    setCheckoutError(null);
+
+    try {
+      // Llamar a la API de checkout
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create checkout');
+      }
+
+      /**
+       * ⚠️ CRITICAL: Lemon Squeezy Overlay vs Redirect
+       * 
+       * PREFERENCIA: Siempre intentar abrir el overlay primero (mejor UX).
+       * Solo redirigir si el overlay no está disponible.
+       * 
+       * FLUJO:
+       * 1. Si `window.LemonSqueezy.Url.Open` existe → Abrir overlay (modal en nuestra web)
+       * 2. Si no existe pero hay checkoutUrl → Redirigir (fallback)
+       * 
+       * ⚠️ NO CAMBIAR: El orden es importante. Verificar `Url.Open` antes de redirigir
+       * asegura que usamos el overlay cuando está disponible.
+       * 
+       * NOTA: NO cerrar el modal premium aquí - dejarlo abierto para que el usuario
+       * vea el checkout overlay encima del modal.
+       */
+      if (data.checkoutUrl && window.LemonSqueezy) {
+        try {
+          // Intentar abrir overlay (preferido - modal en nuestra web)
+          if (window.LemonSqueezy.Url && window.LemonSqueezy.Url.Open) {
+            // NO cerrar el modal aquí - dejarlo abierto para que el usuario vea el checkout
+            window.LemonSqueezy.Url.Open(data.checkoutUrl);
+          } else {
+            // Fallback: overlay no disponible, redirigir
+            window.location.href = data.checkoutUrl;
+          }
+        } catch (err) {
+          // Si hay error al abrir overlay, redirigir como fallback
+          console.error('Error opening Lemon Squeezy overlay:', err);
+          window.location.href = data.checkoutUrl;
+        }
+      } else if (data.checkoutUrl) {
+        // Script no cargado, redirigir directamente
+        window.location.href = data.checkoutUrl;
+      } else {
+        throw new Error('No checkout URL received');
+      }
+    } catch (err) {
+      console.error('Error creating checkout:', err);
+      setCheckoutError(err.message || 'Failed to start checkout. Please try again.');
+    } finally {
+      setIsLoadingCheckout(false);
     }
   };
 
@@ -959,6 +1200,36 @@ export default function QuizEs() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
           {/* Sección de Pregunta - Ocupa 2 columnas en desktop */}
           <div className="lg:col-span-2 order-1 bg-white border border-gray-200 rounded-xl p-4 sm:p-6 md:p-8 shadow-sm">
+          {/* 
+            ⚠️ BUG FIX: Corrección de rutas de imágenes
+            
+            PROBLEMA: Algunas rutas en la base de datos tienen "/public/" (incorrecto)
+            En Next.js, las imágenes en public/ se acceden sin el prefijo "/public"
+            
+            SOLUCIÓN: 
+            1. Script SQL (scripts/fix-image-paths.sql) corrige todas las rutas en la BD
+            2. Script de seeding (seed-questions.mjs) corrige rutas al importar
+            3. Esta corrección en el código es un fallback por si quedan rutas incorrectas
+            
+            NOTA: La corrección en el código es temporal. Lo ideal es corregir la BD.
+          */}
+          {/* Image reference (if available) */}
+          {currentQuestion.image && (
+            <div className="mb-4 sm:mb-6 w-full">
+              <div className="relative w-full h-auto rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                <Image
+                  src={currentQuestion.image.startsWith('/public/') ? currentQuestion.image.replace('/public', '') : currentQuestion.image}
+                  alt="Imagen de referencia de la pregunta"
+                  width={800}
+                  height={600}
+                  className="w-full h-auto object-contain"
+                  priority={currentQuestionIndex < 3}
+                  unoptimized={currentQuestion.image.startsWith('http')}
+                />
+              </div>
+            </div>
+          )}
+          
           <h2 className="text-lg sm:text-xl md:text-2xl font-semibold text-slate-900 mb-4 sm:mb-6 leading-tight">
             {currentQuestion.text}
           </h2>
@@ -1028,9 +1299,27 @@ export default function QuizEs() {
           {/* Botón Siguiente - Antes del score en móvil, después en desktop */}
           {isAnswered && (
             <div className="order-2 lg:order-3 lg:col-span-3 flex justify-end mt-4 sm:mt-6 lg:mt-0">
+              {/* 
+                ⚠️ BUG FIX (Bug #2): Deshabilitar botón después de 20 preguntas
+                
+                PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
+                también deshabilitamos visualmente el botón para mejor UX.
+                
+                Esto previene que el usuario intente hacer clic múltiples veces en "Finalizar"
+                y proporciona feedback visual claro de que no puede continuar sin premium.
+                
+                IMPORTANTE: Aunque el botón esté deshabilitado, handleNext también debe
+                verificar y bloquear el progreso para prevenir que el score aumente si
+                el usuario encuentra alguna forma de ejecutar handleNext.
+              */}
               <button
                 onClick={handleNext}
-                className="px-6 sm:px-8 py-3 sm:py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 touch-manipulation min-w-[120px]"
+                disabled={answeredQuestions >= 20 && !isPremium}
+                className={`px-6 sm:px-8 py-3 sm:py-4 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg touch-manipulation min-w-[120px] ${
+                  answeredQuestions >= 20 && !isPremium
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl active:scale-95"
+                }`}
               >
                 {currentQuestionIndex + 1 < displayQuestionCount ? 'Siguiente' : 'Finalizar'}
               </button>
@@ -1119,7 +1408,7 @@ export default function QuizEs() {
                       $29.99
                     </span>
                     <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-blue-600">
-                      $11.99
+                      $9.99
                     </span>
                   </div>
                   <p className="text-xs sm:text-sm text-gray-600 mt-1">
@@ -1161,12 +1450,24 @@ export default function QuizEs() {
                   </div>
                 </div>
 
+                {/* Error Message */}
+                {checkoutError && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-600">{checkoutError}</p>
+                  </div>
+                )}
+
                 {/* Botón CTA */}
                 <button
                   onClick={handleUpgrade}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-base sm:text-lg md:text-xl py-3 sm:py-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 sm:hover:scale-[1.02] mb-3 touch-manipulation min-h-[48px]"
+                  disabled={isLoadingCheckout || !isLoaded}
+                  className={`w-full text-white font-bold text-base sm:text-lg md:text-xl py-3 sm:py-4 rounded-xl transition-all duration-300 shadow-lg mb-3 touch-manipulation min-h-[48px] ${
+                    isLoadingCheckout || !isLoaded
+                      ? 'bg-blue-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl active:scale-95 sm:hover:scale-[1.02]'
+                  }`}
                 >
-                  Obtener Acceso Inmediato
+                  {isLoadingCheckout ? 'Cargando...' : 'Obtener Acceso Inmediato'}
                 </button>
 
                 {/* Texto de Escasez */}

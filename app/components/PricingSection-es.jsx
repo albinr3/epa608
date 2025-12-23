@@ -38,13 +38,46 @@ export default function PricingSectionEs({
   // - Nunca llamar a Lemon Squeezy directo desde el browser (expondría API keys).
   // - Siempre pedir al backend `POST /api/checkout` para obtener `checkoutUrl`.
   // - Abrir el checkout via overlay (`window.LemonSqueezy.Url.Open`) si el script está cargado; si no, fallback a redirect.
-  //
-  // Cargar script de Lemon Squeezy (overlay)
+  
+  /**
+   * ⚠️ CRITICAL: Lemon Squeezy Overlay Initialization
+   * 
+   * PROBLEMA RESUELTO: Sin esta inicialización, el checkout redirige a una página externa
+   * en lugar de mostrar un modal overlay en nuestra web.
+   * 
+   * CAUSA RAÍZ: El script de Lemon Squeezy (`lemon.js`) se carga pero NO inicializa
+   * automáticamente `window.LemonSqueezy.Url.Open()`. Esta función solo está disponible
+   * después de llamar a `window.createLemonSqueezy()`.
+   * 
+   * SIN `createLemonSqueezy()`:
+   * - `window.LemonSqueezy` puede existir pero `window.LemonSqueezy.Url.Open` es undefined
+   * - El código cae en el fallback de `window.location.href = data.checkoutUrl`
+   * - El usuario es redirigido a la página externa de Lemon Squeezy
+   * 
+   * CON `createLemonSqueezy()`:
+   * - `window.LemonSqueezy.Url.Open()` está disponible
+   * - El checkout se abre como overlay modal dentro de nuestra web
+   * - Mejor experiencia de usuario (no sale de la página)
+   * 
+   * ⚠️ NO REMOVER: Esta inicialización es esencial para que el overlay funcione.
+   * Si se remueve, el checkout volverá a redirigir en lugar de mostrar el modal.
+   */
   useEffect(() => {
     if (typeof window !== 'undefined' && !window.LemonSqueezy) {
       const script = document.createElement('script');
       script.src = 'https://app.lemonsqueezy.com/js/lemon.js';
       script.async = true;
+      script.onload = () => {
+        // CRITICAL: Inicializar Lemon Squeezy para habilitar el overlay
+        // Sin esto, window.LemonSqueezy.Url.Open() no estará disponible
+        if (typeof window.createLemonSqueezy === 'function') {
+          try {
+            window.createLemonSqueezy();
+          } catch (err) {
+            console.error('Error initializing Lemon Squeezy:', err);
+          }
+        }
+      };
       document.body.appendChild(script);
     }
   }, []);
@@ -77,9 +110,35 @@ export default function PricingSectionEs({
         throw new Error(data.error || 'No se pudo crear el checkout');
       }
 
+      /**
+       * ⚠️ CRITICAL: Lemon Squeezy Overlay vs Redirect
+       * 
+       * PREFERENCIA: Siempre intentar abrir el overlay primero (mejor UX).
+       * Solo redirigir si el overlay no está disponible.
+       * 
+       * FLUJO:
+       * 1. Si `window.LemonSqueezy.Url.Open` existe → Abrir overlay (modal en nuestra web)
+       * 2. Si no existe pero hay checkoutUrl → Redirigir (fallback)
+       * 
+       * ⚠️ NO CAMBIAR: El orden es importante. Verificar `Url.Open` antes de redirigir
+       * asegura que usamos el overlay cuando está disponible.
+       */
       if (data.checkoutUrl && window.LemonSqueezy) {
-        window.LemonSqueezy.Url.Open(data.checkoutUrl);
+        try {
+          // Intentar abrir overlay (preferido - modal en nuestra web)
+          if (window.LemonSqueezy.Url && window.LemonSqueezy.Url.Open) {
+            window.LemonSqueezy.Url.Open(data.checkoutUrl);
+          } else {
+            // Fallback: overlay no disponible, redirigir
+            window.location.href = data.checkoutUrl;
+          }
+        } catch (err) {
+          // Si hay error al abrir overlay, redirigir como fallback
+          console.error('Error opening Lemon Squeezy overlay:', err);
+          window.location.href = data.checkoutUrl;
+        }
       } else if (data.checkoutUrl) {
+        // Script no cargado, redirigir directamente
         window.location.href = data.checkoutUrl;
       } else {
         throw new Error('No se recibió URL de checkout');
