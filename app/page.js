@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import Script from 'next/script';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Timer, BookOpen, ShieldCheck, Building2, Users, Award, CheckCircle2, TrendingUp, Zap, TrendingDown, Star, ChevronDown } from 'lucide-react';
 import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import Quiz from './components/Quiz';
@@ -66,8 +67,27 @@ function FAQItem({ question, answer }) {
 
 export default function Home() {
   const { isSignedIn, isLoaded } = useUser();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [showQuiz, setShowQuiz] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
+  const [questionLimit, setQuestionLimit] = useState(null);
+  
+  // Leer query params para deep-linking
+  const quizParam = searchParams?.get('quiz');
+  const typeParam = searchParams?.get('type');
+  
+  // Normalizar type param a initialType para Quiz
+  const getInitialType = () => {
+    if (!typeParam) return undefined;
+    const normalized = typeParam.toLowerCase().trim();
+    if (['core', 'type1', 'type2', 'type3', 'universal'].includes(normalized)) {
+      return normalized;
+    }
+    return undefined;
+  };
+  
+  const initialType = getInitialType();
 
   // Fetch premium status when user is signed in
   useEffect(() => {
@@ -97,7 +117,68 @@ export default function Home() {
 
   // Restore quiz state after OAuth redirect
   useEffect(() => {
-    if (typeof window === 'undefined' || !isLoaded) return;
+    if (typeof window === 'undefined' || !isLoaded) {
+      return;
+    }
+    
+    /**
+     * DEEP LINKING: Manejo de URLs con parámetros ?quiz=1&type=type1
+     * 
+     * IMPORTANTE: Esta funcionalidad permite acceder directamente a un quiz con un límite
+     * específico de preguntas según el tipo:
+     * - type1, type2, type3 → 10 preguntas
+     * - core → 20 preguntas
+     * 
+     * REQUISITOS:
+     * 1. El usuario DEBE estar autenticado para usar deep linking con type
+     * 2. Si no está autenticado, se redirige a login guardando la URL original
+     * 3. El questionLimit se pasa al componente Quiz para limitar las preguntas mostradas
+     * 4. El progreso se guarda y restaura correctamente usando la categoría (TYPE1, TYPE2, etc.)
+     * 
+     * ⚠️ NO MODIFICAR: Esta lógica es crítica para el funcionamiento del deep linking.
+     * Si cambias esto, asegúrate de que:
+     * - El progreso se guarde con la categoría correcta
+     * - El progreso se restaure cuando el usuario vuelve
+     * - El questionLimit se pase correctamente al componente Quiz
+     */
+    const calculateQuestionLimit = (type) => {
+      if (!type) return null;
+      const normalized = type.toLowerCase();
+      if (['type1', 'type2', 'type3'].includes(normalized)) {
+        return 10;
+      } else if (normalized === 'core') {
+        return 20;
+      }
+      return null;
+    };
+    
+    // Si hay query param quiz=1, manejar deep-linking
+    if (quizParam === '1') {
+      // Si hay type param, requiere autenticación y calcular límite
+      if (typeParam && initialType) {
+        const limit = calculateQuestionLimit(initialType);
+        
+        // Si no está autenticado, redirigir a login guardando la URL original
+        // La URL se guarda para restaurar el questionLimit después del login
+        if (!isSignedIn) {
+          const currentUrl = window.location.href;
+          localStorage.setItem('epa608_redirect_after_auth', currentUrl);
+          router.push(`/sign-in?redirect_url=${encodeURIComponent(currentUrl)}`);
+          return;
+        }
+        
+        // Si está autenticado, establecer el límite y mostrar el quiz
+        // El questionLimit se pasa al componente Quiz para limitar las preguntas
+        setQuestionLimit(limit);
+        setShowQuiz(true);
+        return;
+      }
+      
+      // Si no hay type param, mostrar el quiz normalmente (sin límite)
+      setQuestionLimit(null);
+      setShowQuiz(true);
+      return;
+    }
     
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
     const showQuizFlag = localStorage.getItem('epa608_show_quiz');
@@ -109,11 +190,13 @@ export default function Home() {
       localStorage.removeItem('epa608_show_quiz');
       sessionStorage.removeItem('epa608_just_logged_out');
       setShowQuiz(false);
+      setQuestionLimit(null);
       return;
     }
     
     // Si hay flag para mostrar el quiz (desde el menú de otras páginas), mostrarlo
     if (showQuizFlag) {
+      setQuestionLimit(null);
       setShowQuiz(true);
       localStorage.removeItem('epa608_show_quiz');
       return;
@@ -122,6 +205,32 @@ export default function Home() {
     // Solo mostrar el quiz si hay flag de redirect Y el usuario está autenticado
     // Esto evita que se muestre el quiz cuando el usuario se desloguea
     if (redirectFlag && isSignedIn) {
+      /**
+       * RESTAURACIÓN DE DEEP LINKING DESPUÉS DE LOGIN:
+       * Cuando el usuario se autentica después de ser redirigido desde un deep link,
+       * necesitamos restaurar el questionLimit desde la URL guardada.
+       * 
+       * IMPORTANTE: Esto asegura que el quiz se abra con el límite correcto de preguntas
+       * después de que el usuario se autentique.
+       */
+      // Verificar si la URL guardada tiene type param para restaurar el límite
+      try {
+        const savedUrl = new URL(redirectFlag);
+        const savedType = savedUrl.searchParams.get('type');
+        if (savedType) {
+          const normalized = savedType.toLowerCase().trim();
+          if (['core', 'type1', 'type2', 'type3', 'universal'].includes(normalized)) {
+            const limit = calculateQuestionLimit(normalized);
+            setQuestionLimit(limit);
+          } else {
+            setQuestionLimit(null);
+          }
+        } else {
+          setQuestionLimit(null);
+        }
+      } catch (e) {
+        setQuestionLimit(null);
+      }
       setShowQuiz(true);
       // Remover el flag inmediatamente para que al volver a la landing no se abra el quiz otra vez
       localStorage.removeItem('epa608_redirect_after_auth');
@@ -129,11 +238,12 @@ export default function Home() {
       // Si hay flag pero el usuario no está autenticado, limpiar el flag
       // Esto puede pasar si el usuario se deslogueó
       localStorage.removeItem('epa608_redirect_after_auth');
+      setQuestionLimit(null);
     }
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, quizParam, typeParam, initialType, router]);
 
   if (showQuiz) {
-    return <Quiz />;
+    return <Quiz initialType={initialType} questionLimit={questionLimit} />;
   }
 
   return (

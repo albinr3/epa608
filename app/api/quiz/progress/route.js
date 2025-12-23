@@ -30,8 +30,12 @@ export async function GET(req) {
       );
     }
 
+    // Obtener category de query params (default: 'ALL' para compatibilidad)
+    const { searchParams } = new URL(req.url);
+    const category = searchParams.get('category') || 'ALL';
+
     // Obtener el progreso
-    const progress = await getQuizProgress(dbUser.id);
+    const progress = await getQuizProgress(dbUser.id, category);
 
     return NextResponse.json({
       success: true,
@@ -68,7 +72,7 @@ export async function POST(req) {
 
     // Obtener datos del body
     const body = await req.json();
-    const { currentQuestionIndex, correctAnswers, totalAnswered } = body;
+    const { currentQuestionIndex, correctAnswers, totalAnswered, category } = body;
 
 
     // Validar datos
@@ -91,8 +95,11 @@ export async function POST(req) {
       );
     }
 
+    // Usar category del body o default 'ALL' para compatibilidad
+    const progressCategory = category || 'ALL';
+
     // Leer el progreso actual para evitar regresiones
-    const existing = await getQuizProgress(dbUser.id);
+    const existing = await getQuizProgress(dbUser.id, progressCategory);
 
     // Calcular valores "seguros" que nunca disminuyan
     // Si el usuario tiene 8 en DB, ninguna llamada posterior puede bajarlo a 3
@@ -123,6 +130,7 @@ export async function POST(req) {
     // Guardar el progreso usando los valores seguros
     const progress = await saveQuizProgress({
       userId: dbUser.id,
+      category: progressCategory,
       currentQuestionIndex: safeIndex,
       correctAnswers: safeCorrect,
       totalAnswered: safeTotal,

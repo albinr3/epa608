@@ -92,8 +92,31 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const lang = searchParams.get('lang') || 'en';
     const rawCategory = searchParams.get('category') || 'ALL';
-    const category = rawCategory === 'ALL' ? 'ALL' : rawCategory.toUpperCase().trim();
+    
+    /**
+     * NORMALIZACIÓN DE CATEGORÍAS
+     * 
+     * PROBLEMA RESUELTO: Las categorías en la base de datos pueden estar guardadas como:
+     * - "TYPE1" (sin espacio) o "TYPE 1" (con espacio)
+     * - "TYPE2" (sin espacio) o "TYPE 2" (con espacio)
+     * - "TYPE3" (sin espacio) o "TYPE 3" (con espacio)
+     * 
+     * SOLUCIÓN: Normalizamos la categoría y buscamos ambas variantes cuando es TYPE1/TYPE2/TYPE3.
+     * Esto asegura que encontremos las preguntas independientemente de cómo estén guardadas en la BD.
+     * 
+     * ⚠️ IMPORTANTE: Si cambias esta lógica, asegúrate de que:
+     * - Se busquen ambas variantes (con y sin espacio) para TYPE1, TYPE2, TYPE3
+     * - Otras categorías (CORE, ALL) no se vean afectadas
+     * - La query de Supabase use .or() para buscar ambas variantes
+     */
+    // Normalizar categoría: convertir a mayúsculas, remover espacios, y manejar casos especiales
+    let category = rawCategory === 'ALL' ? 'ALL' : rawCategory.toUpperCase().trim();
+    // Si la categoría es TYPE1, TYPE2, TYPE3, también buscar con espacio (TYPE 1, TYPE 2, TYPE 3)
+    // Primero intentar sin espacio, luego con espacio si no encuentra resultados
+    const categoryWithoutSpace = category.replace(/\s+/g, '');
+    const categoryWithSpace = categoryWithoutSpace.replace(/TYPE(\d)/, 'TYPE $1');
     const countParam = searchParams.get('count');
+    const limitParam = searchParams.get('limit'); // Parámetro para deep linking: limita preguntas para usuarios no premium
     const reset = searchParams.get('reset') === '1';
 
     // Headers para no cachear
@@ -115,6 +138,7 @@ export async function GET(req) {
     const authResult = await auth();
     const userId = authResult.userId;
     const isAuthenticated = !!userId;
+    
 
     let dbUser = null;
     let isPremium = false;
@@ -143,7 +167,22 @@ export async function GET(req) {
       .eq('lang', lang);
 
     if (category !== 'ALL') {
-      query = query.eq('category', category);
+      /**
+       * BÚSQUEDA DE CATEGORÍAS CON Y SIN ESPACIO
+       * 
+       * Para TYPE1, TYPE2, TYPE3: buscar ambas variantes (con y sin espacio)
+       * porque la base de datos puede tenerlas guardadas de cualquier forma.
+       * 
+       * Ejemplo: Si buscamos "TYPE1", también buscamos "TYPE 1" para encontrar todas las preguntas.
+       */
+      // Intentar buscar con la categoría normalizada (sin espacios)
+      // Si es TYPE1/TYPE2/TYPE3, también buscar con espacio (TYPE 1/TYPE 2/TYPE 3)
+      if (categoryWithoutSpace.match(/^TYPE[123]$/)) {
+        // Buscar ambas variantes: sin espacio y con espacio usando OR de Supabase
+        query = query.or(`category.eq.${categoryWithoutSpace},category.eq.${categoryWithSpace}`);
+      } else {
+        query = query.eq('category', categoryWithoutSpace);
+      }
     }
 
     const { data: allQuestions, error: questionsError } = await query.order('source_id', { ascending: true });
@@ -208,8 +247,25 @@ export async function GET(req) {
     const sourceIds = allQuestions.map(q => q.source_id);
     const permutation = deterministicShuffle(sourceIds, seed);
 
+    /**
+     * SELECCIÓN DE PREGUNTAS SEGÚN TIPO DE USUARIO Y DEEP LINKING
+     * 
+     * DEEP LINKING: El parámetro `limit` se usa cuando el usuario accede mediante deep linking
+     * (ej: ?quiz=1&type=type1). Esto limita el número de preguntas mostradas:
+     * - type1, type2, type3 → 10 preguntas
+     * - core → 20 preguntas
+     * 
+     * LÓGICA:
+     * - Usuarios premium: pueden ver todas las preguntas (o count si se especifica)
+     * - Usuarios no premium: 
+     *   - Si viene limitParam (deep linking): usar ese límite (10 o 20)
+     *   - Si no viene limitParam: mostrar 20 preguntas por defecto
+     * 
+     * ⚠️ IMPORTANTE: El limitParam solo se aplica a usuarios autenticados no premium.
+     * Los usuarios anónimos siempre ven 3 preguntas aleatorias (manejado arriba).
+     */
     // Para usuarios premium: devolver permutación completa (o count si viene)
-    // Para usuarios no premium: devolver siempre permutation.slice(0, 20)
+    // Para usuarios no premium: usar limit si viene (deep linking), sino 20 por defecto
     let selectedSourceIds;
     if (isPremium) {
       if (countParam) {
@@ -219,8 +275,14 @@ export async function GET(req) {
         selectedSourceIds = permutation;
       }
     } else {
-      // No premium: siempre devolver las primeras 20
-      selectedSourceIds = permutation.slice(0, 20);
+      // No premium: usar limit si viene (deep linking), sino 20 por defecto
+      if (limitParam) {
+        const limit = parseInt(limitParam, 10);
+        selectedSourceIds = permutation.slice(0, limit);
+      } else {
+        // Sin limit: siempre devolver las primeras 20
+        selectedSourceIds = permutation.slice(0, 20);
+      }
     }
 
     const selectedQuestions = selectedSourceIds.map(sourceId =>

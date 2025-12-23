@@ -17,11 +17,12 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS quiz_progress (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  category TEXT NOT NULL DEFAULT 'ALL',
   current_question_index INTEGER DEFAULT 0,
   correct_answers INTEGER DEFAULT 0,
   total_answered INTEGER DEFAULT 0,
   last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user_id)
+  UNIQUE(user_id, category)
 );
 
 -- Tabla de log de emails
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS email_log (
 CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_quiz_progress_user_id ON quiz_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_progress_user_category ON quiz_progress(user_id, category);
 CREATE INDEX IF NOT EXISTS idx_email_log_user_id ON email_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_email_log_type ON email_log(email_type);
 

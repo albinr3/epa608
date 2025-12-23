@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import Script from 'next/script';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Timer, BookOpen, ShieldCheck, Building2, Users, Award, CheckCircle2, TrendingUp, Zap, TrendingDown, Star, ChevronDown } from 'lucide-react';
 import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import Quiz from '../components/Quiz-es';
@@ -67,8 +68,27 @@ function FAQItem({ question, answer }) {
 
 export default function HomeEs() {
   const { isSignedIn, isLoaded } = useUser();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [showQuiz, setShowQuiz] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
+  const [questionLimit, setQuestionLimit] = useState(null);
+  
+  // Leer query params para deep-linking
+  const quizParam = searchParams?.get('quiz');
+  const typeParam = searchParams?.get('type');
+  
+  // Normalizar type param a initialType para Quiz
+  const getInitialType = () => {
+    if (!typeParam) return undefined;
+    const normalized = typeParam.toLowerCase().trim();
+    if (['core', 'type1', 'type2', 'type3', 'universal'].includes(normalized)) {
+      return normalized;
+    }
+    return undefined;
+  };
+  
+  const initialType = getInitialType();
 
   // Fetch premium status when user is signed in
   useEffect(() => {
@@ -99,6 +119,44 @@ export default function HomeEs() {
   // Effect to handle redirect after OAuth authentication
   useEffect(() => {
     if (!isLoaded) return;
+    
+    // Calcular límite de preguntas según el tipo (solo para deep linking con type)
+    const calculateQuestionLimit = (type) => {
+      if (!type) return null;
+      const normalized = type.toLowerCase();
+      if (['type1', 'type2', 'type3'].includes(normalized)) {
+        return 10;
+      } else if (normalized === 'core') {
+        return 20;
+      }
+      return null;
+    };
+    
+    // Si hay query param quiz=1, manejar deep-linking
+    if (quizParam === '1') {
+      // Si hay type param, requiere autenticación y calcular límite
+      if (typeParam && initialType) {
+        const limit = calculateQuestionLimit(initialType);
+        
+        // Si no está autenticado, redirigir a login guardando la URL original
+        if (!isSignedIn) {
+          const currentUrl = window.location.href;
+          localStorage.setItem('epa608_redirect_after_auth', currentUrl);
+          router.push(`/sign-in?redirect_url=${encodeURIComponent(currentUrl)}`);
+          return;
+        }
+        
+        // Si está autenticado, establecer el límite y mostrar el quiz
+        setQuestionLimit(limit);
+        setShowQuiz(true);
+        return;
+      }
+      
+      // Si no hay type param, mostrar el quiz normalmente (sin límite)
+      setQuestionLimit(null);
+      setShowQuiz(true);
+      return;
+    }
 
     // Check if user just returned from authentication
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
@@ -111,11 +169,13 @@ export default function HomeEs() {
       localStorage.removeItem('epa608_show_quiz');
       sessionStorage.removeItem('epa608_just_logged_out');
       setShowQuiz(false);
+      setQuestionLimit(null);
       return;
     }
     
     // Si hay flag para mostrar el quiz (desde el menú de otras páginas), mostrarlo
     if (showQuizFlag) {
+      setQuestionLimit(null);
       setShowQuiz(true);
       localStorage.removeItem('epa608_show_quiz');
       return;
@@ -124,6 +184,24 @@ export default function HomeEs() {
     // Solo mostrar el quiz si hay flag de redirect Y el usuario está autenticado
     // Esto evita que se muestre el quiz cuando el usuario se desloguea
     if (isSignedIn && redirectFlag) {
+      // Verificar si la URL guardada tiene type param para restaurar el límite
+      try {
+        const savedUrl = new URL(redirectFlag);
+        const savedType = savedUrl.searchParams.get('type');
+        if (savedType) {
+          const normalized = savedType.toLowerCase().trim();
+          if (['core', 'type1', 'type2', 'type3', 'universal'].includes(normalized)) {
+            const limit = calculateQuestionLimit(normalized);
+            setQuestionLimit(limit);
+          } else {
+            setQuestionLimit(null);
+          }
+        } else {
+          setQuestionLimit(null);
+        }
+      } catch (e) {
+        setQuestionLimit(null);
+      }
       // User just authenticated, show quiz and restore state
       setShowQuiz(true);
       // Remover el flag inmediatamente para que al volver a la landing no se abra el quiz otra vez
@@ -132,11 +210,12 @@ export default function HomeEs() {
       // Si hay flag pero el usuario no está autenticado, limpiar el flag
       // Esto puede pasar si el usuario se deslogueó
       localStorage.removeItem('epa608_redirect_after_auth');
+      setQuestionLimit(null);
     }
-  }, [isSignedIn, isLoaded]);
+  }, [isSignedIn, isLoaded, quizParam, typeParam, initialType, router]);
 
   if (showQuiz) {
-    return <Quiz />;
+    return <Quiz initialType={initialType} questionLimit={questionLimit} />;
   }
 
   return (

@@ -12,7 +12,29 @@ import LanguageSelector from "./LanguageSelector";
 const QUIZ_STORAGE_KEY = "epa608_quiz_progress";
 const QUIZ_STORAGE_KEY_ES = "epa608_quiz_progress_es";
 
-export default function Quiz() {
+// Mapeo de initialType a category de BD
+const TYPE_TO_CATEGORY = {
+  'core': 'CORE',
+  'type1': 'TYPE1',
+  'type2': 'TYPE2',
+  'type3': 'TYPE3',
+  'universal': 'UNIVERSAL'
+};
+
+// Categorías en orden para modo universal
+const UNIVERSAL_CATEGORIES = ['CORE', 'TYPE1', 'TYPE2', 'TYPE3'];
+
+// Títulos de categoría para mostrar
+const CATEGORY_TITLES = {
+  'CORE': 'CORE',
+  'TYPE1': 'TYPE I',
+  'TYPE2': 'TYPE II',
+  'TYPE3': 'TYPE III',
+  'UNIVERSAL': 'UNIVERSAL',
+  'ALL': 'ALL'
+};
+
+export default function Quiz({ initialType, questionLimit = null }) {
   const { isSignedIn, isLoaded } = useUser();
   const pathname = usePathname();
   const router = useRouter();
@@ -49,10 +71,26 @@ export default function Quiz() {
   const isLoadingQuestionsRef = useRef(false);
   const loadQuestionsKeyRef = useRef(null);
   const prevIsSignedInForQuestionsRef = useRef(isSignedIn);
+  
+  // Estado para categorías
+  const [currentCategory, setCurrentCategory] = useState(() => {
+    // Determinar categoría inicial basada en initialType
+    if (initialType === 'universal') {
+      return 'CORE'; // Empezar con CORE en modo universal
+    } else if (initialType && TYPE_TO_CATEGORY[initialType]) {
+      return TYPE_TO_CATEGORY[initialType];
+    }
+    return 'CORE'; // Default: CORE para las 20 preguntas gratuitas
+  });
+  
+  const [isUniversalMode, setIsUniversalMode] = useState(initialType === 'universal');
+  const [universalCategoryIndex, setUniversalCategoryIndex] = useState(0);
 
   // Cargar preguntas desde la API (solo una vez por combinación de parámetros)
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded) {
+      return;
+    }
     
     // Si isSignedIn cambió de false a true, resetear ref para forzar recarga
     if (prevIsSignedInForQuestionsRef.current === false && isSignedIn === true) {
@@ -60,8 +98,9 @@ export default function Quiz() {
     }
     prevIsSignedInForQuestionsRef.current = isSignedIn;
     
-    // Crear una key única para esta combinación de parámetros
-    const loadKey = `${isSignedIn ? 'auth' : 'anon'}-${isSpanish ? 'es' : 'en'}`;
+    // Crear una key única para esta combinación de parámetros (incluyendo category y questionLimit)
+    const limitKey = questionLimit !== null ? `-limit${questionLimit}` : '';
+    const loadKey = `${isSignedIn ? 'auth' : 'anon'}-${isSpanish ? 'es' : 'en'}-${currentCategory}${limitKey}`;
     
     // Si ya se cargaron preguntas para esta key, no volver a cargar
     if (hasLoadedQuestionsRef.current === loadKey) {
@@ -84,7 +123,23 @@ export default function Quiz() {
       
       try {
         const lang = isSpanish ? 'es' : 'en';
-        const response = await fetch(`/api/questions?lang=${lang}&category=ALL`, { 
+        /**
+         * DEEP LINKING: Construir URL con parámetro limit
+         * 
+         * Cuando viene de deep linking (questionLimit !== null), agregamos el parámetro
+         * limit a la URL de la API para que el servidor devuelva solo ese número de preguntas.
+         * 
+         * IMPORTANTE: Solo agregar limit si:
+         * 1. questionLimit no es null (viene de deep linking)
+         * 2. El usuario está autenticado (los anónimos siempre ven 3 preguntas)
+         */
+        // Construir URL con limit si questionLimit está presente
+        let apiUrl = `/api/questions?lang=${lang}&category=${currentCategory}`;
+        if (questionLimit !== null && isSignedIn) {
+          apiUrl += `&limit=${questionLimit}`;
+        }
+        
+        const response = await fetch(apiUrl, { 
           cache: 'no-store' 
         });
         
@@ -94,6 +149,7 @@ export default function Quiz() {
         }
         
         const data = await response.json();
+        
         if (data.success) {
           setQuestions(data.questions || []);
           setIsPremium(data.isPremium || false);
@@ -129,14 +185,14 @@ export default function Quiz() {
         loadQuestionsKeyRef.current = null;
       }
     };
-  }, [isLoaded, isSignedIn, isSpanish]);
+  }, [isLoaded, isSignedIn, isSpanish, currentCategory, questionLimit]);
 
   const availableQuestions = questions;
   // Para el UI: usuarios anónimos ven 20 preguntas, aunque solo tengan acceso a 3
-  // Para usuarios logueados no premium: 20, para premium: todas
+  // Para usuarios logueados no premium: usar questionLimit si viene (deep linking), sino 20, para premium: todas
   const displayQuestionCount = isPremium 
     ? (limitApplied === Infinity ? questions.length : limitApplied)
-    : (!isSignedIn ? 20 : (limitApplied === Infinity ? questions.length : limitApplied));
+    : (questionLimit !== null ? questionLimit : (!isSignedIn ? 20 : (limitApplied === Infinity ? questions.length : limitApplied)));
   const currentQuestion = availableQuestions[currentQuestionIndex];
   const isAnswered = selectedAnswer !== null;
 
@@ -150,6 +206,7 @@ export default function Quiz() {
 
 
   // Save quiz state to localStorage (save to shared key so progress persists across languages)
+  // Ahora guarda por categoría para progreso independiente
   const saveQuizState = () => {
     try {
       // Filter out nulls and invalid entries before saving
@@ -160,11 +217,19 @@ export default function Quiz() {
         answeredQuestions,
         answers: compact,
         timestamp: Date.now(),
+        category: currentCategory, // Guardar categoría actual
       };
-      // Save to shared key so progress persists across languages
-      localStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify(quizState));
-      // Also save to ES key for backward compatibility
-      localStorage.setItem(QUIZ_STORAGE_KEY_ES, JSON.stringify(quizState));
+      
+      // Guardar en key específica de categoría
+      const categoryKey = `${QUIZ_STORAGE_KEY}_${currentCategory}`;
+      localStorage.setItem(categoryKey, JSON.stringify(quizState));
+      
+      // También guardar en key compartida para compatibilidad (mapea a ALL)
+      if (currentCategory === 'ALL') {
+        localStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify(quizState));
+        // Also save to ES key for backward compatibility
+        localStorage.setItem(QUIZ_STORAGE_KEY_ES, JSON.stringify(quizState));
+      }
     } catch (error) {
       console.error("Error saving quiz state:", error);
     }
@@ -192,6 +257,7 @@ export default function Quiz() {
         currentQuestionIndex: typeof override?.currentQuestionIndex === 'number' ? override.currentQuestionIndex : currentQuestionIndex,
         correctAnswers: typeof override?.correctAnswers === 'number' ? override.correctAnswers : correctAnswers,
         totalAnswered: typeof override?.totalAnswered === 'number' ? override.totalAnswered : answeredQuestions,
+        category: currentCategory, // CRÍTICO: Incluir categoría para que el progreso se restaure correctamente en deep linking
       };
       const response = await fetch('/api/quiz/progress', {
         method: 'POST',
@@ -212,14 +278,24 @@ export default function Quiz() {
     }
   };
 
-  // Load quiz progress from Supabase database
+  /**
+   * CARGAR PROGRESO DEL QUIZ DESDE LA BASE DE DATOS
+   * 
+   * DEEP LINKING: El progreso se carga usando la categoría correcta (TYPE1, TYPE2, TYPE3, CORE)
+   * para que se restaure correctamente cuando el usuario vuelve mediante deep linking.
+   * 
+   * IMPORTANTE: La categoría debe coincidir exactamente con la que se usó para guardar el progreso.
+   * Por ejemplo, si el usuario avanzó en un quiz de TYPE1, el progreso se guarda con category="TYPE1"
+   * y se restaura cuando vuelve a ?quiz=1&type=type1.
+   */
   const loadProgressFromDatabase = async () => {
     if (!isSignedIn || !isLoaded) {
       return null;
     }
 
     try {
-      const response = await fetch('/api/quiz/progress', {
+      // CRÍTICO: Incluir category en la query para restaurar el progreso correcto según el tipo de quiz
+      const response = await fetch(`/api/quiz/progress?category=${currentCategory}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -248,7 +324,7 @@ export default function Quiz() {
     }
   };
 
-  // Restore quiz state from localStorage (check shared key first, then language-specific key)
+  // Restore quiz state from localStorage (check category-specific key first, then shared key)
   const restoreQuizState = () => {
     // Check if we just logged out - if so, don't restore anything
     const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
@@ -264,9 +340,15 @@ export default function Quiz() {
     }
 
     try {
-      // Try shared key first (works across languages)
-      let savedState = localStorage.getItem(QUIZ_STORAGE_KEY);
-      // If not found, try language-specific key as fallback
+      // Primero intentar key específica de categoría
+      const categoryKey = `${QUIZ_STORAGE_KEY}_${currentCategory}`;
+      let savedState = localStorage.getItem(categoryKey);
+      
+      // Si no se encuentra, intentar key compartida (para compatibilidad con progreso antiguo)
+      if (!savedState) {
+        savedState = localStorage.getItem(QUIZ_STORAGE_KEY);
+      }
+      // Si aún no se encuentra, intentar key de español como último recurso
       if (!savedState) {
         savedState = localStorage.getItem(QUIZ_STORAGE_KEY_ES);
       }
@@ -361,9 +443,14 @@ export default function Quiz() {
     return false;
   };
 
-  // Clear quiz state from localStorage (clear both keys)
+  // Clear quiz state from localStorage (clear category-specific key and shared keys)
   const clearQuizState = () => {
     try {
+      // Limpiar key específica de categoría
+      const categoryKey = `${QUIZ_STORAGE_KEY}_${currentCategory}`;
+      localStorage.removeItem(categoryKey);
+      
+      // También limpiar keys compartidas para compatibilidad
       localStorage.removeItem(QUIZ_STORAGE_KEY);
       localStorage.removeItem(QUIZ_STORAGE_KEY_ES);
     } catch (error) {
@@ -407,9 +494,40 @@ export default function Quiz() {
     prevIsSignedInRef.current = isSignedIn;
   }, [isLoaded, isSignedIn]);
 
-  // Restore state on mount and when user signs in
+  /**
+   * RESTAURACIÓN DE PROGRESO DEL QUIZ
+   * 
+   * IMPORTANTE: Este useEffect maneja la restauración del progreso del usuario cuando:
+   * 1. El componente se monta
+   * 2. El usuario inicia sesión
+   * 3. El usuario vuelve a un quiz de deep linking (ej: ?quiz=1&type=type1)
+   * 
+   * DEEP LINKING CON questionLimit:
+   * - Cuando viene de deep linking (questionLimit !== null), DEBEMOS esperar a que las preguntas
+   *   se carguen antes de intentar restaurar el progreso.
+   * - NO saltar la restauración completamente, solo esperar a que las preguntas estén disponibles.
+   * - El progreso se guarda y restaura usando la categoría correcta (TYPE1, TYPE2, TYPE3, CORE).
+   * 
+   * ⚠️ REGRESIÓN EVITADA: En una versión anterior, se saltaba completamente la restauración
+   * cuando venía de deep linking, causando que el progreso no se restaurara. Ahora esperamos
+   * a que las preguntas se carguen y luego intentamos restaurar el progreso normalmente.
+   * 
+   * Si modificas esta lógica en el futuro:
+   * - Asegúrate de que el progreso se restaure cuando el usuario vuelve a un deep link
+   * - No saltes la restauración completamente, solo espera a que las preguntas se carguen
+   * - El progreso debe guardarse y restaurarse usando currentCategory (TYPE1, TYPE2, etc.)
+   */
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded) {
+      return;
+    }
+    
+    // Si viene de deep linking con questionLimit, esperar a que las preguntas se carguen antes de restaurar
+    // Esto evita intentar restaurar cuando no hay preguntas disponibles, pero NO salta la restauración
+    if (questionLimit !== null && (isLoadingQuestions || availableQuestions.length === 0)) {
+      return;
+    }
+    
     // IMPORTANTE (regresión evitada):
     // - Cuando el usuario pasa de ANÓNIMO -> LOGUEADO, queremos "migrar" el progreso (las 3 anónimas)
     //   a la sesión autenticada y continuar en la pregunta 4.
@@ -703,6 +821,7 @@ export default function Quiz() {
             
             saveQuizState();
           } else {
+            // No progress in DB, try localStorage
             restoreQuizState();
           }
           setIsLoadingFromDatabase(false);
@@ -715,6 +834,7 @@ export default function Quiz() {
         }).catch(() => {
           setIsLoadingFromDatabase(false);
           setHasLoadedFromDatabase(true);
+          // On error, fall back to localStorage
           restoreQuizState();
           setIsRestoring(false);
           isLoadingFromDatabaseRef.current = false; // Clear ref on error
@@ -750,7 +870,7 @@ export default function Quiz() {
         hasRestoredRef.current = true;
       }
     }
-  }, [isLoaded, isSignedIn, isLoadingQuestions, availableQuestions.length, isRestoring, isLoadingFromDatabase]);
+  }, [isLoaded, isSignedIn, isLoadingQuestions, availableQuestions.length, isRestoring, isLoadingFromDatabase, questionLimit]);
 
   // Polling para verificar cuando isSignedIn finalmente se actualiza después del redirect
   useEffect(() => {
@@ -1014,9 +1134,33 @@ export default function Quiz() {
       saveQuizState();
       persistProgress();
     } else {
-      // End of quiz - save progress
-      saveQuizState();
-      persistProgress();
+      // End of current category
+      // Si estamos en modo universal, avanzar a la siguiente categoría
+      if (isUniversalMode && universalCategoryIndex < UNIVERSAL_CATEGORIES.length - 1) {
+        const nextCategoryIndex = universalCategoryIndex + 1;
+        const nextCategory = UNIVERSAL_CATEGORIES[nextCategoryIndex];
+        
+        // Resetear estado para la nueva categoría
+        setCurrentCategory(nextCategory);
+        setUniversalCategoryIndex(nextCategoryIndex);
+        setCurrentQuestionIndex(0);
+        setSelectedAnswer(null);
+        setShowExplanation(false);
+        setAnswers([]);
+        setCorrectAnswers(0);
+        setAnsweredQuestions(0);
+        
+        // Forzar recarga de preguntas para la nueva categoría
+        hasLoadedQuestionsRef.current = false;
+        
+        // Guardar progreso de la categoría anterior
+        saveQuizState();
+        persistProgress();
+      } else {
+        // End of quiz (o end of universal mode) - save progress
+        saveQuizState();
+        persistProgress();
+      }
     }
   };
 
@@ -1254,82 +1398,111 @@ export default function Quiz() {
     <div className="min-h-screen bg-gray-50 text-slate-900 relative overflow-hidden">
       {/* Navbar */}
       <nav className="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-white/95 border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
-          <a
-            href={isSpanish ? "/es" : "/"}
-            onClick={(e) => {
-              e.preventDefault();
-              window.location.href = isSpanish ? "/es" : "/";
-            }}
-            className="cursor-pointer inline-block"
-            style={{ textDecoration: "none" }}
-          >
-            <Image
-              src="/logo.png"
-              alt="HVAC Prep"
-              width={400}
-              height={96}
-              className="h-10 sm:h-12 md:h-16 w-auto object-contain"
-              quality={100}
-              priority
-              unoptimized
-            />
-          </a>
-          <div className="flex items-center gap-3 sm:gap-4 md:gap-6 flex-wrap">
-            {(isSignedIn && !isPremium) && (
-              <Link
-                href={isSpanish ? "/es/pricing" : "/pricing"}
-                className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
-              >
-                {isSpanish ? "Precios" : "Pricing"}
-              </Link>
-            )}
-            <LanguageSelector />
-            {isLoaded && (
-              <>
-                {!isSignedIn ? (
-                  <SignInButton
-                    mode="modal"
-                    forceRedirectUrl={
-                      typeof window !== "undefined"
-                        ? window.location.href
-                        : isSpanish
-                          ? "/es"
-                          : "/"
-                    }
-                    fallbackRedirectUrl={
-                      typeof window !== "undefined"
-                        ? window.location.href
-                        : isSpanish
-                          ? "/es"
-                          : "/"
-                    }
-                    onClick={() => {
-                      if (typeof window !== "undefined") {
-                        const currentUrl = window.location.href;
-                        localStorage.setItem(
-                          "epa608_redirect_after_auth",
-                          currentUrl
-                        );
-                      }
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex items-end gap-4">
+            {/* Logo */}
+            <a
+              href={isSpanish ? "/es" : "/"}
+              onClick={(e) => {
+                e.preventDefault();
+                window.location.href = isSpanish ? "/es" : "/";
+              }}
+              className="cursor-pointer inline-block flex-shrink-0"
+              style={{ textDecoration: "none" }}
+            >
+              <Image
+                src="/logo.png"
+                alt="HVAC Prep"
+                width={400}
+                height={96}
+                className="h-10 sm:h-12 md:h-16 w-auto object-contain"
+                quality={100}
+                priority
+                unoptimized
+              />
+            </a>
+            
+            {/* Progress bar - between logo and buttons */}
+            {currentQuestion && (
+              <div className="flex flex-col gap-1 w-full mx-auto justify-start" style={{ verticalAlign: 'bottom' }}>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600 text-xs sm:text-sm font-medium truncate">
+                    Question {answeredQuestions + 1} of {displayQuestionCount}
+                  </span>
+                  {!isPremium && (
+                    <span className="text-blue-600 text-xs sm:text-sm font-semibold flex-shrink-0 ml-2">
+                      Free Mode
+                    </span>
+                  )}
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5 sm:h-2">
+                  <div
+                    className="bg-blue-600 h-1.5 sm:h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${((answeredQuestions + 1) / displayQuestionCount) * 100}%`,
                     }}
-                  >
-                    <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
-                      Login
-                    </button>
-                  </SignInButton>
-                ) : (
-                  <UserButton
-                    appearance={{
-                      elements: {
-                        avatarBox: "w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12",
-                      },
-                    }}
-                    afterSignOutUrl={isSpanish ? "/es" : "/"}
                   />
-                )}
-              </>
+                </div>
+              </div>
             )}
+            
+            {/* Right side buttons */}
+            <div className="flex items-end gap-3 sm:gap-4 md:gap-6 flex-wrap flex-shrink-0 ml-auto">
+              {!(isSignedIn && isPremium) && (
+                <Link
+                  href={isSpanish ? "/es/pricing" : "/pricing"}
+                  className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
+                >
+                  {isSpanish ? "Precios" : "Pricing"}
+                </Link>
+              )}
+              <LanguageSelector />
+              {isLoaded && (
+                <>
+                  {!isSignedIn ? (
+                    <SignInButton
+                      mode="modal"
+                      forceRedirectUrl={
+                        typeof window !== "undefined"
+                          ? window.location.href
+                          : isSpanish
+                            ? "/es"
+                            : "/"
+                      }
+                      fallbackRedirectUrl={
+                        typeof window !== "undefined"
+                          ? window.location.href
+                          : isSpanish
+                            ? "/es"
+                            : "/"
+                      }
+                      onClick={() => {
+                        if (typeof window !== "undefined") {
+                          const currentUrl = window.location.href;
+                          localStorage.setItem(
+                            "epa608_redirect_after_auth",
+                            currentUrl
+                          );
+                        }
+                      }}
+                    >
+                      <button className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium">
+                        Login
+                      </button>
+                    </SignInButton>
+                  ) : (
+                    <UserButton
+                      appearance={{
+                        elements: {
+                          avatarBox: "w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12",
+                        },
+                      }}
+                      afterSignOutUrl={isSpanish ? "/es" : "/"}
+                    />
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </nav>
@@ -1345,27 +1518,15 @@ export default function Quiz() {
 
         {/* Quiz content */}
         <div className="relative z-10 max-w-3xl mx-auto">
-          {/* Header with progress */}
-          <div className="mb-8">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-gray-600 text-base font-medium">
-                Question {currentQuestionIndex + 1} of {displayQuestionCount}
-              </span>
-              {!isPremium && (
-                <span className="text-blue-600 text-base font-semibold">
-                  Free Mode
-                </span>
-              )}
+          {/* Category Title */}
+          {currentCategory !== 'ALL' && (
+            <div className="mb-4 text-center">
+              <h1 className="text-2xl md:text-3xl font-bold text-blue-600">
+                {CATEGORY_TITLES[currentCategory] || currentCategory}
+              </h1>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{
-                  width: `${((currentQuestionIndex + 1) / displayQuestionCount) * 100}%`,
-                }}
-              />
-            </div>
-          </div>
+          )}
+          
 
           {/* Question with marker on the right */}
           {/* CRITICAL FIX: Only render question section if currentQuestion exists */}
@@ -1393,6 +1554,15 @@ export default function Quiz() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             {/* Question Section - Takes 2 columns on desktop */}
             <div className="lg:col-span-2 order-1 bg-white border border-gray-200 rounded-xl p-6 md:p-8 shadow-sm">
+              {/* Category badge for current question */}
+              {currentQuestion?.category && (
+                <div className="mb-4">
+                  <span className="inline-block px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700">
+                    {CATEGORY_TITLES[currentQuestion.category] || currentQuestion.category}
+                  </span>
+                </div>
+              )}
+              
               {/* Image reference (if available) */}
               {/* 
                 ⚠️ BUG FIX: Corrección de rutas de imágenes
@@ -1496,18 +1666,61 @@ export default function Quiz() {
               )}
             </div>
 
-            {/* Next Button - Before score on mobile, after on desktop */}
+            {/* Score Marker - 1 column on desktop */}
+            <div className="lg:col-span-1 order-2 lg:order-2">
+              <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm sticky top-4">
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                  {CATEGORY_TITLES[currentCategory] ? `${CATEGORY_TITLES[currentCategory]} Progress` : 'Your Progress'}
+                </h3>
+                <div className="space-y-3 mb-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Completed:</span>
+                    <span className="text-green-600 font-semibold">
+                      {answeredQuestions}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Remaining:</span>
+                    <span className="text-blue-600 font-semibold">
+                      {displayQuestionCount - answeredQuestions}
+                      {!isPremium && ' free'}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Next Button - Below score on desktop, separate on mobile */}
+                {isAnswered && (
+                  <div className="lg:block hidden">
+                    {/* 
+                      ⚠️ BUG FIX (Bug #1): Deshabilitar botón después de 20 preguntas
+                      
+                      PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
+                      también deshabilitamos visualmente el botón para mejor UX.
+                      
+                      Esto previene que el usuario intente hacer clic múltiples veces y
+                      proporciona feedback visual claro de que no puede continuar sin premium.
+                    */}
+                    <button
+                      onClick={handleNext}
+                      disabled={answeredQuestions >= 20 && !isPremium}
+                      className={`w-full px-8 py-3 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg ${
+                        answeredQuestions >= 20 && !isPremium
+                          ? "bg-gray-400 cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+                      }`}
+                    >
+                      {currentQuestionIndex + 1 < displayQuestionCount
+                        ? "Next"
+                        : "Finish"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Next Button - Mobile only */}
             {isAnswered && (
-              <div className="order-2 lg:order-3 lg:col-span-3 flex justify-end">
-                {/* 
-                  ⚠️ BUG FIX (Bug #1): Deshabilitar botón después de 20 preguntas
-                  
-                  PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
-                  también deshabilitamos visualmente el botón para mejor UX.
-                  
-                  Esto previene que el usuario intente hacer clic múltiples veces y
-                  proporciona feedback visual claro de que no puede continuar sin premium.
-                */}
+              <div className="order-3 lg:hidden flex justify-end">
                 <button
                   onClick={handleNext}
                   disabled={answeredQuestions >= 20 && !isPremium}
@@ -1523,30 +1736,6 @@ export default function Quiz() {
                 </button>
               </div>
             )}
-
-            {/* Score Marker - 1 column on desktop */}
-            <div className="lg:col-span-1 order-3 lg:order-2">
-              <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm sticky top-4">
-                <h3 className="text-lg font-semibold text-slate-900 mb-4">
-                  Your Progress
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Completed:</span>
-                    <span className="text-green-600 font-semibold">
-                      {answeredQuestions}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Remaining:</span>
-                    <span className="text-blue-600 font-semibold">
-                      {displayQuestionCount - answeredQuestions}
-                      {!isPremium && ' free'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
           )}
         </div>
