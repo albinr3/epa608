@@ -213,6 +213,12 @@ export default function QuizEs({ initialType, questionLimit = null }) {
   // Regla: cuando necesites persistir progreso en el MISMO tick donde acabas de contestar una pregunta,
   // usa `saveQuizState({ answeredQuestions: nextAnswered, correctAnswers: nextCorrect, currentQuestionIndex: nextIndex })`.
   const saveQuizState = (override) => {
+    // CRÍTICO: Verificar que estamos en el cliente antes de acceder a localStorage
+    // Durante el prerendering en Vercel, estas APIs no están disponibles
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
     try {
       // Filter out nulls and invalid entries before saving
       const compact = Array.isArray(answers) ? answers.filter(a => a != null && a.questionId != null) : [];
@@ -337,6 +343,12 @@ export default function QuizEs({ initialType, questionLimit = null }) {
 
   // Restaurar estado del quiz desde localStorage (verificar clave compartida primero, luego clave específica de idioma)
   const restoreQuizState = () => {
+    // CRÍTICO: Verificar que estamos en el cliente antes de acceder a sessionStorage/localStorage
+    // Durante el prerendering en Vercel, estas APIs no están disponibles
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    
     // Verificar si acabamos de desloguear - si es así, no restaurar nada
     const justLoggedOut = sessionStorage.getItem('epa608_just_logged_out') || justLoggedOutRef.current;
     if (justLoggedOut && !isSignedIn) {
@@ -395,6 +407,12 @@ export default function QuizEs({ initialType, questionLimit = null }) {
 
   // Limpiar estado del quiz de localStorage (limpiar key específica de categoría y keys compartidas)
   const clearQuizState = () => {
+    // CRÍTICO: Verificar que estamos en el cliente antes de acceder a localStorage
+    // Durante el prerendering en Vercel, estas APIs no están disponibles
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
     try {
       // Limpiar key específica de categoría
       const categoryKey = `${QUIZ_STORAGE_KEY}_${currentCategory}`;
@@ -410,6 +428,12 @@ export default function QuizEs({ initialType, questionLimit = null }) {
 
   // Reiniciar progreso del quiz cuando el usuario se desloguea - DEBE ejecutarse ANTES del useEffect de restauración
   useEffect(() => {
+    // CRÍTICO: Verificar que estamos en el cliente antes de acceder a sessionStorage/localStorage
+    // Durante el prerendering en Vercel, estas APIs no están disponibles
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
     if (!isLoaded) return;
 
     // Solo reiniciar si el usuario estaba autenticado y ahora no lo está (logout real)
@@ -693,6 +717,12 @@ export default function QuizEs({ initialType, questionLimit = null }) {
   
   // Polling para verificar cuando isSignedIn finalmente se actualiza después del redirect
   useEffect(() => {
+    // CRÍTICO: Verificar que estamos en el cliente antes de acceder a localStorage
+    // Durante el prerendering en Vercel, estas APIs no están disponibles
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
     if (!isLoaded) return;
     
     const redirectFlag = localStorage.getItem('epa608_redirect_after_auth');
