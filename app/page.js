@@ -1,5 +1,10 @@
 'use client';
 
+// CRÍTICO: Forzar renderizado dinámico para evitar errores de prerendering con useSearchParams
+// Next.js intenta prerenderizar páginas estáticamente, pero useSearchParams() requiere
+// renderizado dinámico. Esto evita el error durante el build en Vercel.
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
