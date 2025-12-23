@@ -118,6 +118,12 @@ export default function HomeEs() {
 
   // Effect to handle redirect after OAuth authentication
   useEffect(() => {
+    // CRÍTICO: Verificar que estamos en el cliente antes de acceder a window/localStorage
+    // Durante el prerendering en Vercel, estas APIs no están disponibles
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
     if (!isLoaded) return;
     
     // Calcular límite de preguntas según el tipo (solo para deep linking con type)
