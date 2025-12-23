@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { CheckCircle2, Trophy, Shield, Lock, Zap } from "lucide-react";
 import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import AuthModal from "./AuthModal";
@@ -15,6 +15,7 @@ const QUIZ_STORAGE_KEY_ES = "epa608_quiz_progress_es";
 export default function Quiz() {
   const { isSignedIn, isLoaded } = useUser();
   const pathname = usePathname();
+  const router = useRouter();
   const isSpanish = pathname?.startsWith("/es") || false;
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
@@ -22,6 +23,8 @@ export default function Quiz() {
   const [isPremium, setIsPremium] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isLoadingCheckout, setIsLoadingCheckout] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
   const [correctAnswers, setCorrectAnswers] = useState(0);
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
   const [answers, setAnswers] = useState([]); // Track answers for persistence
@@ -837,11 +840,22 @@ export default function Quiz() {
     
     const question = availableQuestions[currentQuestionIndex];
     
-    // Also check if current question index is beyond available questions
-    // Fix Bug 2: Only show modal if there are questions available and we're beyond them
-    // Don't show if availableQuestions.length is 0 (questions still loading or error)
-    // CRITICAL: Also don't show if we're restoring state (prevents false positives when returning to quiz)
-    if (availableQuestions.length > 0 && currentQuestionIndex >= availableQuestions.length && !isPremium && !isRestoring && !isLoadingFromDatabase) {
+    /**
+     * CRITICAL FIX: Show premium modal when user completes exactly 20 questions
+     * 
+     * This useEffect serves as a backup check in case the modal wasn't triggered
+     * in handleNext (e.g., if user navigates directly or state changes occur).
+     * 
+     * IMPORTANT: We check `answeredQuestions === 20` (not `>= 20`)
+     * 
+     * Why this matters:
+     * - Must match the condition in handleNext to ensure consistency
+     * - Using `>= 20` can cause the modal to appear incorrectly if answeredQuestions
+     *   gets out of sync with the actual question index
+     * 
+     * DO NOT CHANGE: This condition must remain `answeredQuestions === 20` to prevent regression.
+     */
+    if (availableQuestions.length > 0 && answeredQuestions === 20 && !isPremium && !isRestoring && !isLoadingFromDatabase) {
       setShowPremiumModal(true);
     }
   }, [currentQuestionIndex, isPremium, isSignedIn, isLoadingQuestions, availableQuestions.length, isRestoring, isLoadingFromDatabase]);
@@ -914,9 +928,27 @@ export default function Quiz() {
       return;
     }
 
-    // Check if next question is beyond available questions for non-premium users
-    // CRITICAL FIX: Don't show premium modal if we're still restoring state
-    if (nextIndex >= availableQuestions.length && !isPremium && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
+    /**
+     * CRITICAL FIX: Show premium modal when user completes exactly 20 questions
+     * 
+     * IMPORTANT: We check `nextAnswered === 20` (not `>= 20` and not based on index)
+     * 
+     * Why this matters:
+     * - The modal must appear EXACTLY when the user completes the 20th question
+     * - Using `nextIndex >= availableQuestions.length` causes the modal to appear
+     *   too late (when trying to go to question 21, not when completing question 20)
+     * - Using `nextAnswered >= 20` can cause the modal to appear too early if
+     *   there's any desynchronization between answeredQuestions and currentQuestionIndex
+     * 
+     * Previous bug: Modal appeared when user tried to go to question 21 (index 20),
+     * but user had already completed 20+ questions, making the timing feel wrong.
+     * 
+     * Solution: Check for exactly 20 completed questions, regardless of index position.
+     * This ensures the modal appears immediately after completing question 20.
+     * 
+     * DO NOT CHANGE: This condition must remain `nextAnswered === 20` to prevent regression.
+     */
+    if (nextAnswered === 20 && !isPremium && !isRestoring && !isLoadingFromDatabase && availableQuestions.length > 0) {
       setShowPremiumModal(true);
       // Save progress before showing modal
       saveQuizState();
@@ -951,22 +983,94 @@ export default function Quiz() {
     }
   };
 
+  // Load Lemon Squeezy script
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.LemonSqueezy) {
+      const script = document.createElement('script');
+      script.src = 'https://app.lemonsqueezy.com/js/lemon.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  }, []);
+
   const handleCloseModal = () => {
     setShowPremiumModal(false);
+    setCheckoutError(null);
     // User stays on current question (we don't advance if not premium)
   };
 
-  const handleUpgrade = () => {
-    // Real payment logic would go here
-    setIsPremium(true);
-    setShowPremiumModal(false);
-    // Advance to next question after becoming premium
-    const nextIndex = currentQuestionIndex + 1;
-    // After becoming premium, all questions are available
-    if (nextIndex < questions.length) {
-      setCurrentQuestionIndex(nextIndex);
-      setSelectedAnswer(null);
-      setShowExplanation(false);
+  const handleUpgrade = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1003',message:'handleUpgrade called',data:{isSignedIn,isLoaded,lemonSqueezyLoaded:typeof window !== 'undefined' && !!window.LemonSqueezy},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
+    // Verificar autenticación
+    if (!isLoaded) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1010',message:'handleUpgrade - Clerk not loaded',data:{isLoaded},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      return;
+    }
+
+    if (!isSignedIn) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1016',message:'handleUpgrade - user not signed in, redirecting',data:{isSignedIn},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      // Redirigir a login si no está autenticado
+      router.push('/sign-in?redirect_url=' + encodeURIComponent(window.location.href));
+      return;
+    }
+
+    setIsLoadingCheckout(true);
+    setCheckoutError(null);
+
+    try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1026',message:'handleUpgrade - calling /api/checkout',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      
+      // Llamar a la API de checkout
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1040',message:'handleUpgrade - checkout response received',data:{ok:response.ok,hasCheckoutUrl:!!data.checkoutUrl,hasLemonSqueezy:typeof window !== 'undefined' && !!window.LemonSqueezy,error:data.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create checkout');
+      }
+
+      if (data.checkoutUrl && window.LemonSqueezy) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1047',message:'handleUpgrade - opening Lemon Squeezy overlay',data:{checkoutUrl:data.checkoutUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        // Abrir checkout overlay de Lemon Squeezy
+        // NO cerrar el modal aquí - dejarlo abierto para que el usuario vea el checkout
+        window.LemonSqueezy.Url.Open(data.checkoutUrl);
+      } else if (data.checkoutUrl) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1052',message:'handleUpgrade - redirecting to checkout (script not loaded)',data:{checkoutUrl:data.checkoutUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        // Si el script no está cargado, redirigir
+        window.location.href = data.checkoutUrl;
+      } else {
+        throw new Error('No checkout URL received');
+      }
+    } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/7375362b-177d-4802-b0fe-ffaa1942d9d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Quiz.js:1058',message:'handleUpgrade - ERROR',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      console.error('Error creating checkout:', err);
+      setCheckoutError(err.message || 'Failed to start checkout. Please try again.');
+    } finally {
+      setIsLoadingCheckout(false);
     }
   };
 
@@ -1337,8 +1441,19 @@ export default function Quiz() {
 
         {/* Premium Modal with PricingSection */}
         {showPremiumModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
-            <div className="bg-gray-50 rounded-2xl max-w-2xl w-full my-4 sm:my-8 shadow-2xl relative">
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto"
+            onClick={(e) => {
+              // Close modal only if clicking the backdrop, not the modal content
+              if (e.target === e.currentTarget) {
+                handleCloseModal();
+              }
+            }}
+          >
+            <div 
+              className="bg-gray-50 rounded-2xl max-w-2xl w-full my-4 sm:my-8 shadow-2xl relative"
+              onClick={(e) => e.stopPropagation()} // Prevent clicks inside modal from closing it
+            >
               {/* Close button */}
               <button
                 onClick={handleCloseModal}
@@ -1439,12 +1554,23 @@ export default function Quiz() {
                     </div>
                   </div>
 
+                  {/* Error Message */}
+                  {checkoutError && (
+                    <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-sm text-red-600">{checkoutError}</p>
+                    </div>
+                  )}
+
                   {/* CTA Button */}
                   <button
-                    onClick={handleUpgrade}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-base sm:text-lg md:text-xl py-3 sm:py-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-[1.02] mb-3"
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent event bubbling that might close the modal
+                      handleUpgrade();
+                    }}
+                    disabled={isLoadingCheckout || !isLoaded}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-bold text-base sm:text-lg md:text-xl py-3 sm:py-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-[1.02] mb-3"
                   >
-                    Get Instant Access
+                    {isLoadingCheckout ? 'Loading...' : 'Get Instant Access'}
                   </button>
 
                   {/* Scarcity Text */}
