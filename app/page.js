@@ -1,11 +1,6 @@
 'use client';
 
-// CRÍTICO: Forzar renderizado dinámico para evitar errores de prerendering con useSearchParams
-// Next.js intenta prerenderizar páginas estáticamente, pero useSearchParams() requiere
-// renderizado dinámico. Esto evita el error durante el build en Vercel.
-export const dynamic = 'force-dynamic';
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import Script from 'next/script';
@@ -70,7 +65,8 @@ function FAQItem({ question, answer }) {
   );
 }
 
-export default function Home() {
+// Componente interno que usa useSearchParams - debe estar envuelto en Suspense
+function HomeContent() {
   const { isSignedIn, isLoaded } = useUser();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -930,5 +926,21 @@ export default function Home() {
       </footer>
     </div>
     </>
+  );
+}
+
+// Componente wrapper con Suspense para useSearchParams
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }
