@@ -1607,6 +1607,9 @@ export default function Quiz({ initialType, questionLimit = null }) {
                       buttonClass += isCorrect
                         ? "bg-green-500 border-green-600 text-white"
                         : "bg-red-500 border-red-600 text-white";
+                    } else if (index === currentQuestion.correct_answer) {
+                      // Marcar la respuesta correcta en verde cuando se selecciona una incorrecta
+                      buttonClass += "bg-green-500 border-green-600 text-white";
                     } else {
                       buttonClass += "bg-gray-100 border-gray-200 text-gray-500";
                     }
@@ -1628,10 +1631,10 @@ export default function Quiz({ initialType, questionLimit = null }) {
                 })}
               </div>
 
-              {/* Explanation */}
+              {/* Explanation - Mobile only (inside question column) */}
               {showExplanation && (
                 <div
-                  className={`mt-6 p-4 rounded-lg border-2 ${
+                  className={`mt-6 lg:hidden p-4 rounded-lg border-2 ${
                     isCorrect
                       ? "bg-green-50 border-green-200"
                       : "bg-red-50 border-red-200"
@@ -1668,51 +1671,92 @@ export default function Quiz({ initialType, questionLimit = null }) {
 
             {/* Score Marker - 1 column on desktop */}
             <div className="lg:col-span-1 order-2 lg:order-2">
-              <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm sticky top-4">
-                <h3 className="text-lg font-semibold text-slate-900 mb-4">
-                  {CATEGORY_TITLES[currentCategory] ? `${CATEGORY_TITLES[currentCategory]} Progress` : 'Your Progress'}
-                </h3>
-                <div className="space-y-3 mb-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Completed:</span>
-                    <span className="text-green-600 font-semibold">
-                      {answeredQuestions}
-                    </span>
+              <div className="space-y-6">
+                <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm sticky top-4">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                    {CATEGORY_TITLES[currentCategory] ? `${CATEGORY_TITLES[currentCategory]} Progress` : 'Your Progress'}
+                  </h3>
+                  <div className="space-y-3 mb-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600">Completed:</span>
+                      <span className="text-green-600 font-semibold">
+                        {answeredQuestions}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600">Remaining:</span>
+                      <span className="text-blue-600 font-semibold">
+                        {displayQuestionCount - answeredQuestions}
+                        {!isPremium && ' free'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Remaining:</span>
-                    <span className="text-blue-600 font-semibold">
-                      {displayQuestionCount - answeredQuestions}
-                      {!isPremium && ' free'}
-                    </span>
-                  </div>
+                  
+                  {/* Next Button - Below score on desktop, separate on mobile */}
+                  {isAnswered && (
+                    <div className="lg:block hidden">
+                      {/* 
+                        ⚠️ BUG FIX (Bug #1): Deshabilitar botón después de 20 preguntas
+                        
+                        PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
+                        también deshabilitamos visualmente el botón para mejor UX.
+                        
+                        Esto previene que el usuario intente hacer clic múltiples veces y
+                        proporciona feedback visual claro de que no puede continuar sin premium.
+                      */}
+                      <button
+                        onClick={handleNext}
+                        disabled={answeredQuestions >= 20 && !isPremium}
+                        className={`w-full px-8 py-3 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg ${
+                          answeredQuestions >= 20 && !isPremium
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+                        }`}
+                      >
+                        {currentQuestionIndex + 1 < displayQuestionCount
+                          ? "Next"
+                          : "Finish"}
+                      </button>
+                    </div>
+                  )}
                 </div>
-                
-                {/* Next Button - Below score on desktop, separate on mobile */}
-                {isAnswered && (
-                  <div className="lg:block hidden">
-                    {/* 
-                      ⚠️ BUG FIX (Bug #1): Deshabilitar botón después de 20 preguntas
-                      
-                      PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
-                      también deshabilitamos visualmente el botón para mejor UX.
-                      
-                      Esto previene que el usuario intente hacer clic múltiples veces y
-                      proporciona feedback visual claro de que no puede continuar sin premium.
-                    */}
-                    <button
-                      onClick={handleNext}
-                      disabled={answeredQuestions >= 20 && !isPremium}
-                      className={`w-full px-8 py-3 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg ${
-                        answeredQuestions >= 20 && !isPremium
-                          ? "bg-gray-400 cursor-not-allowed"
-                          : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+
+                {/* Explanation - Desktop only (below score) */}
+                {showExplanation && (
+                  <div className="hidden lg:block">
+                    <div
+                      className={`p-4 rounded-lg border-2 ${
+                        isCorrect
+                          ? "bg-green-50 border-green-200"
+                          : "bg-red-50 border-red-200"
                       }`}
                     >
-                      {currentQuestionIndex + 1 < displayQuestionCount
-                        ? "Next"
-                        : "Finish"}
-                    </button>
+                      <div className="flex items-start gap-3 mb-2">
+                        {isCorrect ? (
+                          <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-white text-sm font-bold">✕</span>
+                          </div>
+                        )}
+                        <div>
+                          <h3
+                            className={`font-semibold mb-1 ${
+                              isCorrect ? "text-green-900" : "text-red-900"
+                            }`}
+                          >
+                            {isCorrect ? "Correct!" : "Incorrect"}
+                          </h3>
+                          <p
+                            className={`text-sm md:text-base ${
+                              isCorrect ? "text-green-800" : "text-red-800"
+                            }`}
+                          >
+                            {currentQuestion?.explanation || ''}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

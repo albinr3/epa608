@@ -1432,6 +1432,9 @@ export default function QuizEs({ initialType, questionLimit = null }) {
                   buttonClass += isCorrect
                     ? "bg-green-500 border-green-600 text-white"
                     : "bg-red-500 border-red-600 text-white";
+                } else if (index === currentQuestion.correct_answer) {
+                  // Marcar la respuesta correcta en verde cuando se selecciona una incorrecta
+                  buttonClass += "bg-green-500 border-green-600 text-white";
                 } else {
                   buttonClass += "bg-gray-100 border-gray-200 text-gray-500";
                 }
@@ -1452,9 +1455,9 @@ export default function QuizEs({ initialType, questionLimit = null }) {
             })}
           </div>
 
-          {/* Explicación */}
+          {/* Explicación - Solo móvil (dentro de la columna de pregunta) */}
           {showExplanation && (
-            <div className={`mt-6 p-4 rounded-lg border-2 ${
+            <div className={`mt-6 lg:hidden p-4 rounded-lg border-2 ${
               isCorrect 
                 ? 'bg-green-50 border-green-200' 
                 : 'bg-red-50 border-red-200'
@@ -1486,60 +1489,95 @@ export default function QuizEs({ initialType, questionLimit = null }) {
 
           {/* Marcador de puntuación - 1 columna en desktop */}
           <div className="lg:col-span-1 order-2 lg:order-2">
-            <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm lg:sticky lg:top-4">
-              <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-3 sm:mb-4">
-                {CATEGORY_TITLES[currentCategory] ? `${CATEGORY_TITLES[currentCategory]} Progreso` : 'Tu Progreso'}
-              </h3>
-              <div className="space-y-2 sm:space-y-3 mb-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm sm:text-base">Completadas:</span>
-                  {/* IMPORTANTE: usar answeredQuestions (progreso real) en vez de currentQuestionIndex+1.
-                      `currentQuestionIndex` puede diferir de `total_answered` (DB) y causar discrepancias al cambiar de idioma. */}
-                  <span className="text-green-600 font-semibold text-sm sm:text-base">{answeredQuestions}</span>
+            <div className="space-y-4 sm:space-y-6">
+              <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm lg:sticky lg:top-4">
+                <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-3 sm:mb-4">
+                  {CATEGORY_TITLES[currentCategory] ? `${CATEGORY_TITLES[currentCategory]} Progreso` : 'Tu Progreso'}
+                </h3>
+                <div className="space-y-2 sm:space-y-3 mb-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm sm:text-base">Completadas:</span>
+                    {/* IMPORTANTE: usar answeredQuestions (progreso real) en vez de currentQuestionIndex+1.
+                        `currentQuestionIndex` puede diferir de `total_answered` (DB) y causar discrepancias al cambiar de idioma. */}
+                    <span className="text-green-600 font-semibold text-sm sm:text-base">{answeredQuestions}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm sm:text-base">Restantes:</span>
+                    <span className="text-blue-600 font-semibold text-sm sm:text-base">
+                      {Math.max(displayQuestionCount - answeredQuestions, 0)}
+                      {!isPremium && answeredQuestions < 20 && ` gratis`}
+                    </span>
+                  </div>
+                  {!isPremium && answeredQuestions >= 20 && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <p className="text-blue-600 text-xs sm:text-sm text-center font-medium leading-tight">
+                        💡 Has completado la prueba gratuita. Desbloquea más preguntas para continuar.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm sm:text-base">Restantes:</span>
-                  <span className="text-blue-600 font-semibold text-sm sm:text-base">
-                    {Math.max(displayQuestionCount - answeredQuestions, 0)}
-                    {!isPremium && answeredQuestions < 20 && ` gratis`}
-                  </span>
-                </div>
-                {!isPremium && answeredQuestions >= 20 && (
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <p className="text-blue-600 text-xs sm:text-sm text-center font-medium leading-tight">
-                      💡 Has completado la prueba gratuita. Desbloquea más preguntas para continuar.
-                    </p>
+                
+                {/* Botón Siguiente - Debajo del score en desktop, separado en móvil */}
+                {isAnswered && (
+                  <div className="lg:block hidden">
+                    {/* 
+                      ⚠️ BUG FIX (Bug #2): Deshabilitar botón después de 20 preguntas
+                      
+                      PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
+                      también deshabilitamos visualmente el botón para mejor UX.
+                      
+                      Esto previene que el usuario intente hacer clic múltiples veces en "Finalizar"
+                      y proporciona feedback visual claro de que no puede continuar sin premium.
+                      
+                      IMPORTANTE: Aunque el botón esté deshabilitado, handleNext también debe
+                      verificar y bloquear el progreso para prevenir que el score aumente si
+                      el usuario encuentra alguna forma de ejecutar handleNext.
+                    */}
+                    <button
+                      onClick={handleNext}
+                      disabled={answeredQuestions >= 20 && !isPremium}
+                      className={`w-full px-6 sm:px-8 py-3 sm:py-4 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg ${
+                        answeredQuestions >= 20 && !isPremium
+                          ? "bg-gray-400 cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+                      }`}
+                    >
+                      {currentQuestionIndex + 1 < displayQuestionCount ? 'Siguiente' : 'Finalizar'}
+                    </button>
                   </div>
                 )}
               </div>
-              
-              {/* Botón Siguiente - Debajo del score en desktop, separado en móvil */}
-              {isAnswered && (
-                <div className="lg:block hidden">
-                  {/* 
-                    ⚠️ BUG FIX (Bug #2): Deshabilitar botón después de 20 preguntas
-                    
-                    PARTE DE LA SOLUCIÓN: Además de bloquear el progreso en handleNext,
-                    también deshabilitamos visualmente el botón para mejor UX.
-                    
-                    Esto previene que el usuario intente hacer clic múltiples veces en "Finalizar"
-                    y proporciona feedback visual claro de que no puede continuar sin premium.
-                    
-                    IMPORTANTE: Aunque el botón esté deshabilitado, handleNext también debe
-                    verificar y bloquear el progreso para prevenir que el score aumente si
-                    el usuario encuentra alguna forma de ejecutar handleNext.
-                  */}
-                  <button
-                    onClick={handleNext}
-                    disabled={answeredQuestions >= 20 && !isPremium}
-                    className={`w-full px-6 sm:px-8 py-3 sm:py-4 text-white font-semibold text-base sm:text-lg rounded-lg transition-all duration-300 shadow-lg ${
-                      answeredQuestions >= 20 && !isPremium
-                        ? "bg-gray-400 cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
-                    }`}
-                  >
-                    {currentQuestionIndex + 1 < displayQuestionCount ? 'Siguiente' : 'Finalizar'}
-                  </button>
+
+              {/* Explicación - Solo desktop (debajo del score) */}
+              {showExplanation && (
+                <div className="hidden lg:block">
+                  <div className={`p-4 rounded-lg border-2 ${
+                    isCorrect 
+                      ? 'bg-green-50 border-green-200' 
+                      : 'bg-red-50 border-red-200'
+                  }`}>
+                    <div className="flex items-start gap-3 mb-2">
+                      {isCorrect ? (
+                        <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-sm font-bold">✕</span>
+                        </div>
+                      )}
+                      <div>
+                        <h3 className={`font-semibold mb-1 ${
+                          isCorrect ? 'text-green-900' : 'text-red-900'
+                        }`}>
+                          {isCorrect ? '¡Correcto!' : 'Incorrecto'}
+                        </h3>
+                        <p className={`text-sm md:text-base ${
+                          isCorrect ? 'text-green-800' : 'text-red-800'
+                        }`}>
+                          {currentQuestion.explanation}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
