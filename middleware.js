@@ -5,15 +5,14 @@ import { NextResponse } from "next/server";
 const isPublicRoute = createRouteMatcher([
   "/",
   "/pricing",
-  "/es",
-  "/es/pricing",
-  "/es/epa-608-practice-test-en-espanol",
   "/terms",
   "/privacy",
   "/contact",
-  "/es/terms",
-  "/es/privacy",
-  "/es/contact",
+  "/epa-608-practice-test",
+  "/epa-608-universal-practice-test",
+  "/what-is-epa-certification",
+  "/es",
+  "/es/(.*)", // All Spanish routes (includes /es/pricing, /es/terms, etc.)
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/sso-callback", // Ruta de callback de OAuth de Clerk
