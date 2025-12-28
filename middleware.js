@@ -7,6 +7,7 @@ const isPublicRoute = createRouteMatcher([
   "/pricing",
   "/es",
   "/es/pricing",
+  "/es/epa-608-practice-test-en-espanol",
   "/terms",
   "/privacy",
   "/contact",
@@ -126,6 +127,10 @@ export default clerkMiddleware(async (auth, request) => {
       else url.pathname = `/es${pathname}`;
       return NextResponse.redirect(url);
     } else if (languagePreference === "en" && pathname.startsWith("/es")) {
+      // No redirigir si es una ruta pública específica en español (como la página pillar)
+      if (pathname === "/es/epa-608-practice-test-en-espanol") {
+        return NextResponse.next();
+      }
       const url = request.nextUrl.clone();
       if (pathname === "/es") url.pathname = "/";
       else if (pathname === "/es/pricing") url.pathname = "/pricing";

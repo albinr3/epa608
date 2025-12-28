@@ -64,11 +64,48 @@ export async function POST(req) {
         const existingUser = await getUserByClerkId(userId);
 
         // Guardar o actualizar usuario en la base de datos
+        // Intentar extraer nombre de diferentes fuentes si firstName/lastName no están disponibles
+        let firstNameValue = user.firstName || null;
+        let lastNameValue = user.lastName || null;
+        
+        // Si no tenemos nombre/apellido, intentar extraer del nombre completo
+        if (!firstNameValue && !lastNameValue) {
+          const fullName = user.fullName || user.name || null;
+          if (fullName) {
+            const nameParts = fullName.trim().split(/\s+/);
+            if (nameParts.length > 0) {
+              firstNameValue = nameParts[0] || null;
+              lastNameValue = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+            }
+          }
+        }
+        
+        // Si aún no tenemos nombre, intentar desde externalAccounts (Google OAuth)
+        if (!firstNameValue && !lastNameValue && user.externalAccounts) {
+          const googleAccount = user.externalAccounts.find(acc => 
+            acc.provider === 'oauth_google' || acc.provider === 'google'
+          );
+          if (googleAccount) {
+            const googleName = googleAccount.firstName || googleAccount.name || null;
+            if (googleName) {
+              const nameParts = googleName.trim().split(/\s+/);
+              if (nameParts.length > 0) {
+                firstNameValue = nameParts[0] || null;
+                lastNameValue = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+              }
+            }
+            // También verificar si hay apellido separado
+            if (googleAccount.lastName) {
+              lastNameValue = googleAccount.lastName;
+            }
+          }
+        }
+        
         const dbUser = await upsertUser({
           clerkId: userId,
           email: email,
-          firstName: user.firstName || null,
-          lastName: user.lastName || null,
+          firstName: firstNameValue,
+          lastName: lastNameValue,
         });
 
         // Si es un usuario nuevo y no se ha enviado el email de bienvenida, enviarlo

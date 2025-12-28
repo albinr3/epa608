@@ -1,12 +1,60 @@
 'use client';
 
+import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
+import { ChevronDown } from 'lucide-react';
 // Anti-regresión: este `PricingSection-es` debe mantenerse funcionalmente equivalente al pricing en inglés
 // (`app/components/PricingSection.jsx`) en el flujo de checkout (auth → POST /api/checkout → overlay).
 import PricingSection from '../../components/PricingSection-es';
 import LanguageSelector from '../../components/LanguageSelector';
+
+// Componente dropdown para Quiz
+function QuizDropdown() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const quizOptions = [
+    { label: 'Universal', type: 'universal', href: '/es?quiz=1&type=universal' },
+    { label: 'Tipo I', type: 'type1', href: '/es?quiz=1&type=type1' },
+    { label: 'Tipo II', type: 'type2', href: '/es?quiz=1&type=type2' },
+    { label: 'Tipo III', type: 'type3', href: '/es?quiz=1&type=type3' },
+  ];
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium flex items-center gap-1"
+      >
+        Quiz
+        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <>
+          <div 
+            className="fixed inset-0 z-10" 
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+            <div className="py-2">
+              {quizOptions.map((option) => (
+                <Link
+                  key={option.type || 'all'}
+                  href={option.href}
+                  onClick={() => setIsOpen(false)}
+                  className="block px-4 py-2 text-sm sm:text-base text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                >
+                  {option.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function PricingPageEs() {
   const { isSignedIn, isLoaded } = useUser();
@@ -36,17 +84,7 @@ export default function PricingPageEs() {
                 Precios
               </Link>
             )}
-            <Link
-              href="/es"
-              onClick={() => {
-                if (typeof window !== 'undefined') {
-                  localStorage.setItem('epa608_show_quiz', 'true');
-                }
-              }}
-              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
-            >
-              Quiz
-            </Link>
+            <QuizDropdown />
             <LanguageSelector />
             {isLoaded && (
               <>

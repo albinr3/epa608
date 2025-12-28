@@ -46,5 +46,17 @@ export default function sitemap() {
       url: `${baseUrl}/es/contact`,
       lastModified: now,
     },
+    {
+      url: `${baseUrl}/epa-608-practice-test`,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/es/epa-608-practice-test-en-espanol`,
+      lastModified: now,
+    },
+    {
+      url: `${baseUrl}/epa-608-universal-practice-test`,
+      lastModified: now,
+    },
   ];
 }

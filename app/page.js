@@ -65,6 +65,52 @@ function FAQItem({ question, answer }) {
   );
 }
 
+// Componente dropdown para Quiz
+function QuizDropdown() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const quizOptions = [
+    { label: 'Universal', type: 'universal', href: '/?quiz=1&type=universal' },
+    { label: 'Type I', type: 'type1', href: '/?quiz=1&type=type1' },
+    { label: 'Type II', type: 'type2', href: '/?quiz=1&type=type2' },
+    { label: 'Type III', type: 'type3', href: '/?quiz=1&type=type3' },
+  ];
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium flex items-center gap-1"
+      >
+        Quiz
+        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <>
+          <div 
+            className="fixed inset-0 z-10" 
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+            <div className="py-2">
+              {quizOptions.map((option) => (
+                <Link
+                  key={option.type || 'all'}
+                  href={option.href}
+                  onClick={() => setIsOpen(false)}
+                  className="block px-4 py-2 text-sm sm:text-base text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                >
+                  {option.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Componente interno que usa useSearchParams - debe estar envuelto en Suspense
 function HomeContent() {
   const { isSignedIn, isLoaded } = useUser();
@@ -89,6 +135,38 @@ function HomeContent() {
   };
   
   const initialType = getInitialType();
+
+  // Sync user to database when they sign in (same logic as Quiz component)
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    if (isSignedIn) {
+      const syncKey = "epa608_user_synced";
+      const hasSynced = sessionStorage.getItem(syncKey);
+      const syncInProgressKey = "epa608_user_sync_in_progress";
+      const syncInProgress = sessionStorage.getItem(syncInProgressKey);
+
+      if (!hasSynced && !syncInProgress) {
+        // Marcar que la sincronización está en progreso para evitar llamadas duplicadas
+        sessionStorage.setItem(syncInProgressKey, "true");
+
+        fetch("/api/users/sync", { method: "POST" })
+          .then(async (res) => {
+            const text = await res.text();
+            if (!res.ok) throw new Error(text);
+            return JSON.parse(text);
+          })
+          .then((data) => {
+            if (data.success) sessionStorage.setItem(syncKey, "true");
+            sessionStorage.removeItem(syncInProgressKey);
+          })
+          .catch((err) => {
+            console.error("Error syncing user:", err);
+            sessionStorage.removeItem(syncInProgressKey);
+          });
+      }
+    }
+  }, [isLoaded, isSignedIn]);
 
   // Fetch premium status when user is signed in
   useEffect(() => {
@@ -336,12 +414,7 @@ function HomeContent() {
                 Pricing
               </Link>
             )}
-            <button
-              onClick={() => setShowQuiz(true)}
-              className="text-base sm:text-lg md:text-xl lg:text-2xl text-slate-700 hover:text-blue-600 transition-colors duration-300 font-medium"
-            >
-              Quiz
-            </button>
+            <QuizDropdown />
             <LanguageSelector />
             {isLoaded && (
               <>
@@ -423,7 +496,7 @@ function HomeContent() {
             onClick={() => setShowQuiz(true)}
             className="px-6 sm:px-12 md:px-20 lg:px-24 py-3 sm:py-4 md:py-5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-base sm:text-lg md:text-xl lg:text-2xl rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 mb-6 w-full sm:w-auto"
           >
-            Try it for free
+            {isPremium ? "Go to Quiz" : "Try it for free"}
           </button>
           
           {/* Subtexto pequeño */}
@@ -890,7 +963,7 @@ function HomeContent() {
               onClick={() => setShowQuiz(true)}
               className="px-8 sm:px-12 md:px-16 lg:px-20 py-4 sm:py-5 md:py-6 bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg sm:text-xl md:text-2xl lg:text-3xl rounded-xl sm:rounded-2xl transition-all duration-300 shadow-xl hover:shadow-2xl hover:scale-105"
             >
-              Start Practicing Free Now
+              {isPremium ? "Go to Quiz" : "Start Practicing Free Now"}
             </button>
           </div>
         </div>

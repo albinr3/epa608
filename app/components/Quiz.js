@@ -1006,6 +1006,11 @@ export default function Quiz({ initialType, questionLimit = null }) {
       return;
     }
 
+    // Scroll al top en móvil cuando se hace click en Next
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
     // Calcular isCorrect
     const isCorrect = selectedAnswer === currentQuestion.correct_answer;
 
@@ -1507,8 +1512,8 @@ export default function Quiz({ initialType, questionLimit = null }) {
         </div>
       </nav>
 
-      {/* Quiz Content with padding for navbar */}
-      <div className="pt-20 sm:pt-24 p-4 md:p-8 relative">
+      {/* Quiz Content with padding for navbar and sticky button */}
+      <div className="pt-20 sm:pt-24 pb-20 lg:pb-8 p-4 md:p-8 relative">
         {/* Decorative background elements - non-interactive */}
         <div className="absolute inset-0 pointer-events-none">
           {/* Subtle circular gradients */}
@@ -1759,16 +1764,57 @@ export default function Quiz({ initialType, questionLimit = null }) {
                     </div>
                   </div>
                 )}
+
+                {/* Go to other quiz types */}
+                <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                    Go to Quiz Type
+                  </h3>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        window.location.href = isSpanish ? "/es?quiz=1&type=universal" : "/?quiz=1&type=universal";
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-white font-semibold bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors border border-blue-600 hover:border-blue-700"
+                    >
+                      Universal
+                    </button>
+                    <button
+                      onClick={() => {
+                        window.location.href = isSpanish ? "/es?quiz=1&type=type1" : "/?quiz=1&type=type1";
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-white font-semibold bg-green-600 hover:bg-green-700 rounded-lg transition-colors border border-green-600 hover:border-green-700"
+                    >
+                      Type I
+                    </button>
+                    <button
+                      onClick={() => {
+                        window.location.href = isSpanish ? "/es?quiz=1&type=type2" : "/?quiz=1&type=type2";
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-white font-semibold bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors border border-purple-600 hover:border-purple-700"
+                    >
+                      Type II
+                    </button>
+                    <button
+                      onClick={() => {
+                        window.location.href = isSpanish ? "/es?quiz=1&type=type3" : "/?quiz=1&type=type3";
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-white font-semibold bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors border border-orange-600 hover:border-orange-700"
+                    >
+                      Type III
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             
-            {/* Next Button - Mobile only */}
+            {/* Next Button - Mobile only (sticky) */}
             {isAnswered && (
-              <div className="order-3 lg:hidden flex justify-end">
+              <div className="order-3 lg:hidden fixed bottom-0 left-0 right-0 p-4 bg-transparent z-30">
                 <button
                   onClick={handleNext}
                   disabled={answeredQuestions >= 20 && !isPremium}
-                  className={`px-8 py-3 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg ${
+                  className={`w-full px-8 py-3 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg ${
                     answeredQuestions >= 20 && !isPremium
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"

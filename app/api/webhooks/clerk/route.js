@@ -7,6 +7,7 @@ export async function POST(req) {
   const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
   if (!WEBHOOK_SECRET) {
+    console.error('[WEBHOOK ERROR] WEBHOOK_SECRET is not set');
     return new Response('Error: WEBHOOK_SECRET is not set', { status: 500 });
   }
 
@@ -18,6 +19,7 @@ export async function POST(req) {
 
   // Si no hay headers, retornar error
   if (!svix_id || !svix_timestamp || !svix_signature) {
+    console.error('[WEBHOOK ERROR] Missing svix headers');
     return new Response('Error: Missing svix headers', { status: 400 });
   }
 
@@ -45,6 +47,49 @@ export async function POST(req) {
   // Obtener el tipo de evento
   const eventType = evt.type;
   const { id, email_addresses, first_name, last_name } = evt.data;
+  
+  // Función helper para extraer nombre y apellido de diferentes fuentes
+  const extractNameFromPayload = (data) => {
+    let firstName = first_name || null;
+    let lastName = last_name || null;
+    
+    // Si no tenemos nombre/apellido, intentar extraer del nombre completo
+    if (!firstName && !lastName) {
+      const fullName = data?.full_name || data?.name || null;
+      if (fullName) {
+        const nameParts = fullName.trim().split(/\s+/);
+        if (nameParts.length > 0) {
+          firstName = nameParts[0] || null;
+          lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+        }
+      }
+    }
+    
+    // Si aún no tenemos nombre, intentar desde external_accounts (Google OAuth)
+    if (!firstName && !lastName && data?.external_accounts) {
+      const googleAccount = data.external_accounts.find(acc => 
+        acc.provider === 'oauth_google' || acc.provider === 'google'
+      );
+      if (googleAccount) {
+        const googleName = googleAccount.first_name || googleAccount.name || null;
+        if (googleName) {
+          const nameParts = googleName.trim().split(/\s+/);
+          if (nameParts.length > 0) {
+            firstName = nameParts[0] || null;
+            lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+          }
+        }
+        // También verificar si hay apellido separado
+        if (googleAccount.last_name) {
+          lastName = googleAccount.last_name;
+        }
+      }
+    }
+    
+    return { firstName, lastName };
+  };
+  
+  const { firstName: extractedFirstName, lastName: extractedLastName } = extractNameFromPayload(evt.data);
 
   // Procesar evento user.created
   if (eventType === 'user.created') {
@@ -59,12 +104,16 @@ export async function POST(req) {
         return new Response('Error: No email address found', { status: 400 });
       }
 
-      // Guardar usuario en la base de datos
+      // Guardar usuario en la base de datos (usar valores extraídos)
+      // NOTA: upsertUser ahora preserva automáticamente valores existentes si los nuevos son null
+      const firstNameValue = extractedFirstName;
+      const lastNameValue = extractedLastName;
+      
       const user = await upsertUser({
         clerkId: id,
         email: primaryEmail.email_address,
-        firstName: first_name || null,
-        lastName: last_name || null,
+        firstName: firstNameValue,
+        lastName: lastNameValue,
       });
 
       // Enviar email de bienvenida
@@ -103,11 +152,14 @@ export async function POST(req) {
       ) || email_addresses?.[0];
 
       if (primaryEmail?.email_address) {
+        // Extraer nombre también en user.updated
+        const { firstName: updatedFirstName, lastName: updatedLastName } = extractNameFromPayload(evt.data);
+        
         await upsertUser({
           clerkId: id,
           email: primaryEmail.email_address,
-          firstName: first_name || null,
-          lastName: last_name || null,
+          firstName: updatedFirstName,
+          lastName: updatedLastName,
         });
       }
 
